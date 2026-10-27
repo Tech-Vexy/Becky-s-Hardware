@@ -109,7 +109,7 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({ isOpen, onClos
         {/* Sync Action */}
         <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-xl p-4">
           <div>
-            <h4 className="text-sm font-bold text-amber-900">Cloud Supabase Synchronization</h4>
+            <h4 className="text-sm font-bold text-amber-900">Cloud Database Synchronization</h4>
             <p className="text-xs text-amber-700 mt-0.5">
               All transactions are queued with unique idempotency keys to prevent duplicate checkout or stock loss.
             </p>

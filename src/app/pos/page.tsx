@@ -2069,7 +2069,7 @@ export default function POSPage() {
                     Update Master Catalog Price Permanently
                   </span>
                   <p className="text-[11px] text-slate-600 mt-0.5">
-                    If checked, this item&apos;s default shelf price in the catalog will be updated and synchronized to Supabase for all future sales.
+                    If checked, this item&apos;s default shelf price in the catalog will be updated and synchronized across the store for all future sales.
                   </p>
                 </div>
               </label>
