@@ -1,0 +1,132 @@
+{
+  "id": "/",
+  "scope": "/",
+  "name": "Becky's Hardware Store",
+  "short_name": "Becky's Hardware",
+  "description": "Single-store Hardware Management PWA for Kenyan Retail with offline POS and inventory ledger",
+  "lang": "en",
+  "dir": "ltr",
+  "start_url": "/",
+  "display": "standalone",
+  "display_override": [
+    "window-controls-overlay",
+    "standalone",
+    "minimal-ui"
+  ],
+  "orientation": "any",
+  "theme_color": "#d97706",
+  "background_color": "#0f172a",
+  "categories": [
+    "business",
+    "productivity",
+    "utilities",
+    "shopping"
+  ],
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
+  "prefer_related_applications": false,
+  "related_applications": [],
+  "features": [
+    "Offline POS",
+    "Hardware Catalogue",
+    "Stock Ledger",
+    "Fast Few-Letter Search"
+  ],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Point of Sale (POS)",
+      "short_name": "POS",
+      "description": "Open touchscreen POS checkout",
+      "url": "/pos",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Product Catalogue",
+      "short_name": "Catalogue",
+      "description": "Browse 193 hardware items and prices",
+      "url": "/catalogue",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Inventory Ledger",
+      "short_name": "Stock",
+      "description": "Check stock on hand and low stock reorders",
+      "url": "/inventory",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Financial Reports",
+      "short_name": "Reports",
+      "description": "View daily cash register and Z-report",
+      "url": "/reports",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshot-wide.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Becky's Hardware Store Management Dashboard and POS"
+    },
+    {
+      "src": "/screenshot-narrow.png",
+      "sizes": "750x1334",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Becky's Hardware Store Mobile Checkout"
+    }
+  ]
+}
