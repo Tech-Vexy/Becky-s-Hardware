@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useNotifications } from '@/lib/notifications/NotificationContext';
 import {
@@ -81,8 +81,10 @@ export const NotificationBell: React.FC = () => {
     };
   }, [isOpen]);
 
-  const displayedNotifications =
-    activeTab === 'unread' ? notifications.filter((n) => !n.read) : notifications;
+  const displayedNotifications = useMemo(
+    () => (activeTab === 'unread' ? notifications.filter((n) => !n.read) : notifications),
+    [activeTab, notifications]
+  );
 
   return (
     <div className="relative" ref={dropdownRef}>

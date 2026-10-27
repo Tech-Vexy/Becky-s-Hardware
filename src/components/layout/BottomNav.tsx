@@ -22,6 +22,26 @@ import {
   FileText,
 } from 'lucide-react';
 
+const MAIN_NAV_ITEMS = [
+  { name: 'Home', href: '/', icon: LayoutDashboard },
+  { name: 'Catalogue', href: '/catalogue', icon: Boxes },
+  { name: 'POS', href: '/pos', icon: ShoppingCart, isPos: true },
+  { name: 'Stock', href: '/inventory', icon: ClipboardList },
+];
+
+const MORE_MODULES = [
+  { name: 'Invoices & Billing', href: '/invoices', icon: FileText, desc: 'KRA tax invoices & A4 PDF' },
+  { name: 'Purchases & Receiving', href: '/purchases', icon: Truck, desc: 'Stock in & supplier POs' },
+  { name: 'Customers & Credit', href: '/customers', icon: Users, desc: 'Ledger & repayments' },
+  { name: 'Suppliers', href: '/suppliers', icon: Building2, desc: 'Directory & contacts' },
+  { name: 'Payments & M-Pesa', href: '/payments', icon: CreditCard, desc: 'Reconcile transactions' },
+  { name: 'Sales Returns', href: '/returns', icon: RotateCcw, desc: 'Refunds & damaged items' },
+  { name: 'Store Expenses', href: '/expenses', icon: Receipt, desc: 'Casual labor & fuel' },
+  { name: 'Financial Reports', href: '/reports', icon: BarChart3, desc: 'Daily Z-report & P&L' },
+  { name: 'Audit Logs', href: '/audit-logs', icon: History, desc: 'System trace & activity' },
+  { name: 'Store Settings', href: '/settings', icon: Settings, desc: 'KRA PIN, printer & profile' },
+];
+
 export const BottomNav: React.FC = () => {
   const pathname = usePathname();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
@@ -29,27 +49,7 @@ export const BottomNav: React.FC = () => {
   // Don't show bottom nav on login screen
   if (pathname === '/login') return null;
 
-  const mainNavItems = [
-    { name: 'Home', href: '/', icon: LayoutDashboard },
-    { name: 'Catalogue', href: '/catalogue', icon: Boxes },
-    { name: 'POS', href: '/pos', icon: ShoppingCart, isPos: true },
-    { name: 'Stock', href: '/inventory', icon: ClipboardList },
-  ];
-
-  const moreModules = [
-    { name: 'Invoices & Billing', href: '/invoices', icon: FileText, desc: 'KRA tax invoices & A4 PDF' },
-    { name: 'Purchases & Receiving', href: '/purchases', icon: Truck, desc: 'Stock in & supplier POs' },
-    { name: 'Customers & Credit', href: '/customers', icon: Users, desc: 'Ledger & repayments' },
-    { name: 'Suppliers', href: '/suppliers', icon: Building2, desc: 'Directory & contacts' },
-    { name: 'Payments & M-Pesa', href: '/payments', icon: CreditCard, desc: 'Reconcile transactions' },
-    { name: 'Sales Returns', href: '/returns', icon: RotateCcw, desc: 'Refunds & damaged items' },
-    { name: 'Store Expenses', href: '/expenses', icon: Receipt, desc: 'Casual labor & fuel' },
-    { name: 'Financial Reports', href: '/reports', icon: BarChart3, desc: 'Daily Z-report & P&L' },
-    { name: 'Audit Logs', href: '/audit-logs', icon: History, desc: 'System trace & activity' },
-    { name: 'Store Settings', href: '/settings', icon: Settings, desc: 'KRA PIN, printer & profile' },
-  ];
-
-  const isMoreModuleActive = moreModules.some((m) => pathname === m.href);
+  const isMoreModuleActive = MORE_MODULES.some((m) => pathname === m.href);
 
   return (
     <>
@@ -81,7 +81,7 @@ export const BottomNav: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-4 max-h-[60vh] overflow-y-auto no-scrollbar">
-              {moreModules.map((item) => {
+              {MORE_MODULES.map((item) => {
                 const isActive = pathname === item.href;
                 const Icon = item.icon;
 
@@ -124,7 +124,7 @@ export const BottomNav: React.FC = () => {
       >
         <div className="pointer-events-auto w-full md:w-auto md:min-w-[460px] bg-white/95 backdrop-blur-md border-t md:border border-slate-200/90 md:rounded-2xl shadow-[0_-4px_16px_rgba(0,0,0,0.06)] md:shadow-xl px-3 py-1.5 md:py-2 pb-[max(0.375rem,env(safe-area-inset-bottom))]">
           <div className="flex items-center justify-around md:gap-4">
-            {mainNavItems.map((item) => {
+            {MAIN_NAV_ITEMS.map((item) => {
               const isActive = pathname === item.href;
               const Icon = item.icon;
 

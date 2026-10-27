@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { localDb } from '@/lib/dexie/db';
 import { syncEngine } from '@/lib/sync/syncEngine';
 import { useAuth } from '@/lib/auth/AuthContext';
@@ -36,9 +36,11 @@ export default function ReturnsPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const loadData = async () => {
-    const rList = await localDb.returns.orderBy('created_at').reverse().toArray();
+    const [rList, sList] = await Promise.all([
+      localDb.returns.orderBy('created_at').reverse().toArray(),
+      localDb.sales.where('status').equals('completed').toArray(),
+    ]);
     setReturns(rList);
-    const sList = await localDb.sales.where('status').equals('completed').toArray();
     setSales(sList);
   };
 
@@ -74,9 +76,9 @@ export default function ReturnsPage() {
     );
   };
 
-  const totalRefundAmount = returnItems.reduce(
-    (sum, item) => sum + item.return_qty * item.unit_price,
-    0
+  const totalRefundAmount = useMemo(
+    () => returnItems.reduce((sum, item) => sum + item.return_qty * item.unit_price, 0),
+    [returnItems]
   );
 
   const handleProcessReturn = async () => {

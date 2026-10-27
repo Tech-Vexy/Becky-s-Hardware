@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { localDb } from '@/lib/dexie/db';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { formatKES, formatDate } from '@/lib/utils/formatters';
@@ -35,44 +35,60 @@ export default function PaymentsPage() {
     loadSales();
   }, []);
 
-  // Flatten payment records
-  const allPayments: Array<
-    Payment & { receipt_number: string; customer_name?: string | null; cashier_name?: string | null }
-  > = [];
+  // Flatten payment records with memoization
+  const allPayments = useMemo(() => {
+    const list: Array<
+      Payment & { receipt_number: string; customer_name?: string | null; cashier_name?: string | null }
+    > = [];
 
-  for (const s of sales) {
-    if (s.payments) {
-      for (const p of s.payments) {
-        allPayments.push({
-          ...p,
-          receipt_number: s.receipt_number,
-          customer_name: s.customer_name_snapshot,
-          cashier_name: s.cashier_name_snapshot,
-        });
+    for (const s of sales) {
+      if (s.payments) {
+        for (const p of s.payments) {
+          list.push({
+            ...p,
+            receipt_number: s.receipt_number,
+            customer_name: s.customer_name_snapshot,
+            cashier_name: s.cashier_name_snapshot,
+          });
+        }
       }
     }
-  }
+    return list;
+  }, [sales]);
 
-  const filteredPayments = allPayments.filter((p) => {
-    const matchMethod = selectedMethod === 'All' || p.method === selectedMethod;
-    const matchVerif =
-      verificationFilter === 'All' || p.verification_status === verificationFilter;
+  const filteredPayments = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
-    const matchSearch =
-      !q ||
-      p.receipt_number.toLowerCase().includes(q) ||
-      (p.provider_reference && p.provider_reference.toLowerCase().includes(q)) ||
-      (p.customer_name && p.customer_name.toLowerCase().includes(q));
-    return matchMethod && matchVerif && matchSearch;
-  });
+    return allPayments.filter((p) => {
+      const matchMethod = selectedMethod === 'All' || p.method === selectedMethod;
+      const matchVerif =
+        verificationFilter === 'All' || p.verification_status === verificationFilter;
+      const matchSearch =
+        !q ||
+        p.receipt_number.toLowerCase().includes(q) ||
+        (p.provider_reference && p.provider_reference.toLowerCase().includes(q)) ||
+        (p.customer_name && p.customer_name.toLowerCase().includes(q));
+      return matchMethod && matchVerif && matchSearch;
+    });
+  }, [allPayments, selectedMethod, verificationFilter, searchQuery]);
 
-  const totalCollected = allPayments.reduce((sum, p) => sum + p.amount_kes, 0);
-  const totalMpesa = allPayments
-    .filter((p) => p.method === 'mpesa')
-    .reduce((sum, p) => sum + p.amount_kes, 0);
-  const unverifiedMpesa = allPayments.filter(
-    (p) => p.method === 'mpesa' && p.verification_status === 'unverified'
-  );
+  // Single-pass memoized payment metrics
+  const { totalCollected, totalMpesa, unverifiedMpesa } = useMemo(() => {
+    let collected = 0;
+    let mpesa = 0;
+    const unverified: typeof allPayments = [];
+
+    for (const p of allPayments) {
+      collected += p.amount_kes;
+      if (p.method === 'mpesa') {
+        mpesa += p.amount_kes;
+        if (p.verification_status === 'unverified') {
+          unverified.push(p);
+        }
+      }
+    }
+
+    return { totalCollected: collected, totalMpesa: mpesa, unverifiedMpesa: unverified };
+  }, [allPayments]);
 
   const handleVerify = async (payment: Payment, newStatus: PaymentVerificationStatus) => {
     if (!user) return;

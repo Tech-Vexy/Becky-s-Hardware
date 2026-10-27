@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { localDb } from '@/lib/dexie/db';
 import { syncEngine } from '@/lib/sync/syncEngine';
 import { useAuth } from '@/lib/auth/AuthContext';
@@ -74,16 +74,20 @@ export default function InvoicesPage() {
   const [selectedInvoiceDetail, setSelectedInvoiceDetail] = useState<Invoice | null>(null);
 
   const loadData = async () => {
-    const invs = await localDb.invoices.orderBy('created_at').reverse().toArray();
+    // Concurrently load invoices, customers, and active products
+    const [invs, custs, prods] = await Promise.all([
+      localDb.invoices.orderBy('created_at').reverse().toArray(),
+      localDb.customers.where('active').equals(1).toArray(),
+      localDb.products.where('active').equals(1).toArray(),
+    ]);
+
     setInvoices(invs);
-    const custs = await localDb.customers.where('active').equals(1).toArray();
     setCustomers(custs);
     if (custs.length > 0 && !selectedCustomerId) {
       setSelectedCustomerId(custs[0].id);
       setCustomCustomerName(custs[0].full_name);
       setCustomerPhone(custs[0].phone || '');
     }
-    const prods = await localDb.products.where('active').equals(1).toArray();
     setProducts(prods);
     if (prods.length > 0 && !lineProductId) {
       setLineProductId(prods[0].id);
@@ -136,9 +140,11 @@ export default function InvoicesPage() {
     setInvoiceItems((prev) => prev.filter((_, idx) => idx !== index));
   };
 
-  const invoiceSubtotal = invoiceItems.reduce((sum, item) => sum + item.line_total_kes, 0);
-  const invoiceTax = Math.round(invoiceSubtotal * (16 / 116) * 100) / 100;
-  const invoiceTotal = invoiceSubtotal;
+  const { invoiceSubtotal, invoiceTax, invoiceTotal } = useMemo(() => {
+    const subtotal = invoiceItems.reduce((sum, item) => sum + item.line_total_kes, 0);
+    const tax = Math.round(subtotal * (16 / 116) * 100) / 100;
+    return { invoiceSubtotal: subtotal, invoiceTax: tax, invoiceTotal: subtotal };
+  }, [invoiceItems]);
 
   const handleCreateInvoice = async (asDraft: boolean = false) => {
     if (!customCustomerName.trim()) {
@@ -289,34 +295,50 @@ export default function InvoicesPage() {
     }
   };
 
-  // KPI Calculations
-  const totalInvoiced = invoices.reduce((sum, inv) => sum + inv.total_kes, 0);
-  const totalReceivables = invoices.reduce((sum, inv) => sum + inv.balance_due_kes, 0);
-  const totalPaid = invoices.reduce((sum, inv) => sum + inv.amount_paid_kes, 0);
-  const overdueCount = invoices.filter(
-    (inv) => inv.status !== 'paid' && new Date(inv.due_date).getTime() < Date.now()
-  ).length;
+  // Single-pass memoized KPI Calculations
+  const { totalInvoiced, totalReceivables, totalPaid, overdueCount } = useMemo(() => {
+    let invoiced = 0;
+    let receivables = 0;
+    let paid = 0;
+    let overdue = 0;
+    const nowTime = Date.now();
 
-  const filteredInvoices = invoices.filter((inv) => {
-    if (statusFilter !== 'all') {
-      if (statusFilter === 'overdue') {
-        const isPastDue = new Date(inv.due_date).getTime() < Date.now() && inv.status !== 'paid';
-        if (!isPastDue) return false;
-      } else if (inv.status !== statusFilter) {
-        return false;
+    for (const inv of invoices) {
+      invoiced += inv.total_kes;
+      receivables += inv.balance_due_kes;
+      paid += inv.amount_paid_kes;
+      if (inv.status !== 'paid' && new Date(inv.due_date).getTime() < nowTime) {
+        overdue++;
       }
     }
 
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      const num = inv.invoice_number.toLowerCase();
-      const cust = inv.customer_name.toLowerCase();
-      const phone = (inv.customer_phone || '').toLowerCase();
-      return num.includes(q) || cust.includes(q) || phone.includes(q);
-    }
+    return { totalInvoiced: invoiced, totalReceivables: receivables, totalPaid: paid, overdueCount: overdue };
+  }, [invoices]);
 
-    return true;
-  });
+  const filteredInvoices = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    const nowTime = Date.now();
+
+    return invoices.filter((inv) => {
+      if (statusFilter !== 'all') {
+        if (statusFilter === 'overdue') {
+          const isPastDue = new Date(inv.due_date).getTime() < nowTime && inv.status !== 'paid';
+          if (!isPastDue) return false;
+        } else if (inv.status !== statusFilter) {
+          return false;
+        }
+      }
+
+      if (q) {
+        const num = inv.invoice_number.toLowerCase();
+        const cust = inv.customer_name.toLowerCase();
+        const phone = (inv.customer_phone || '').toLowerCase();
+        return num.includes(q) || cust.includes(q) || phone.includes(q);
+      }
+
+      return true;
+    });
+  }, [invoices, statusFilter, searchQuery]);
 
   return (
     <div className="space-y-6">

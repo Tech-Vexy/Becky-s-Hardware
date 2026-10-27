@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { localDb } from '@/lib/dexie/db';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { formatKES, formatDate } from '@/lib/utils/formatters';
@@ -36,7 +36,22 @@ export default function ExpensesPage() {
     loadExpenses();
   }, []);
 
-  const totalExpenseAmount = expenses.reduce((sum, e) => sum + e.amount_kes, 0);
+  // Single-pass memoized expense totals
+  const { totalExpenseAmount, cashExpensesAmount, casualLaborAmount } = useMemo(() => {
+    let total = 0;
+    let cash = 0;
+    let labor = 0;
+    for (const e of expenses) {
+      total += e.amount_kes;
+      if (e.payment_method === 'cash') cash += e.amount_kes;
+      if (e.category === 'casual_labor') labor += e.amount_kes;
+    }
+    return {
+      totalExpenseAmount: total,
+      cashExpensesAmount: cash,
+      casualLaborAmount: labor,
+    };
+  }, [expenses]);
 
   const handleOpenAdd = () => {
     setFormData({
@@ -128,11 +143,7 @@ export default function ExpensesPage() {
           </div>
           <div className="mt-3">
             <div className="text-2xl font-black text-slate-900">
-              {formatKES(
-                expenses
-                  .filter((e) => e.payment_method === 'cash')
-                  .reduce((sum, e) => sum + e.amount_kes, 0)
-              )}
+              {formatKES(cashExpensesAmount)}
             </div>
             <div className="text-xs text-slate-400 mt-0.5">Disbursed directly from cash register</div>
           </div>
@@ -149,11 +160,7 @@ export default function ExpensesPage() {
           </div>
           <div className="mt-3">
             <div className="text-2xl font-black text-slate-900">
-              {formatKES(
-                expenses
-                  .filter((e) => e.category === 'casual_labor')
-                  .reduce((sum, e) => sum + e.amount_kes, 0)
-              )}
+              {formatKES(casualLaborAmount)}
             </div>
             <div className="text-xs text-slate-400 mt-0.5">Offloading cement & heavy steel</div>
           </div>

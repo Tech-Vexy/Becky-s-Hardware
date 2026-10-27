@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { localDb } from '@/lib/dexie/db';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { formatKES, formatDate } from '@/lib/utils/formatters';
@@ -28,49 +28,79 @@ export default function ReportsPage() {
   const [products, setProducts] = useState<Product[]>([]);
 
   useEffect(() => {
+    let cancelled = false;
     const loadReports = async () => {
-      const s = await localDb.sales.where('status').equals('completed').toArray();
+      // Concurrently load sales, expenses, customer repayments, and active products
+      const [s, e, r, p] = await Promise.all([
+        localDb.sales.where('status').equals('completed').toArray(),
+        localDb.expenses.toArray(),
+        localDb.customerRepayments.toArray(),
+        localDb.products.where('active').equals(1).toArray(),
+      ]);
+
+      if (cancelled) return;
+
       setSales(s);
-      const e = await localDb.expenses.toArray();
       setExpenses(e);
-      const r = await localDb.customerRepayments.toArray();
       setRepayments(r);
-      const p = await localDb.products.where('active').equals(1).toArray();
       setProducts(p);
     };
     loadReports();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const grossSales = sales.reduce((sum, s) => sum + s.total_kes, 0);
-  const totalTax = sales.reduce((sum, s) => sum + s.tax_kes, 0);
+  // Memoized cash drawer and sales calculations (Z-Report)
+  const { grossSales, totalTax, cashSales, cashRepayments, cashExpenses, netCashInDrawer } = useMemo(() => {
+    let gross = 0;
+    let tax = 0;
+    let cashFromSales = 0;
 
-  // Cash drawer calculation (Z-Report)
-  const cashSales = sales.reduce((sum, s) => {
-    const cash = s.payments?.filter((p) => p.method === 'cash').reduce((acc, p) => acc + p.amount_kes, 0) || 0;
-    return sum + cash;
-  }, 0);
-
-  const cashRepayments = repayments
-    .filter((r) => r.method === 'cash')
-    .reduce((sum, r) => sum + r.amount_kes, 0);
-
-  const cashExpenses = expenses
-    .filter((e) => e.payment_method === 'cash')
-    .reduce((sum, e) => sum + e.amount_kes, 0);
-
-  const netCashInDrawer = cashSales + cashRepayments - cashExpenses;
-
-  // Inventory valuation by category
-  const categoryValuations: Record<string, { count: number; cost: number; retail: number }> = {};
-  for (const p of products) {
-    const cat = p.category_name || 'General';
-    if (!categoryValuations[cat]) {
-      categoryValuations[cat] = { count: 0, cost: 0, retail: 0 };
+    for (const s of sales) {
+      gross += s.total_kes;
+      tax += s.tax_kes;
+      if (s.payments) {
+        for (const p of s.payments) {
+          if (p.method === 'cash') cashFromSales += p.amount_kes;
+        }
+      }
     }
-    categoryValuations[cat].count += 1;
-    categoryValuations[cat].cost += p.stock_on_hand * (p.buying_price_kes || 0);
-    categoryValuations[cat].retail += p.stock_on_hand * p.selling_price_kes;
-  }
+
+    let cashRepay = 0;
+    for (const r of repayments) {
+      if (r.method === 'cash') cashRepay += r.amount_kes;
+    }
+
+    let cashExp = 0;
+    for (const exp of expenses) {
+      if (exp.payment_method === 'cash') cashExp += exp.amount_kes;
+    }
+
+    return {
+      grossSales: gross,
+      totalTax: tax,
+      cashSales: cashFromSales,
+      cashRepayments: cashRepay,
+      cashExpenses: cashExp,
+      netCashInDrawer: cashFromSales + cashRepay - cashExp,
+    };
+  }, [sales, repayments, expenses]);
+
+  // Memoized inventory valuation by category
+  const categoryValuations = useMemo(() => {
+    const valuations: Record<string, { count: number; cost: number; retail: number }> = {};
+    for (const p of products) {
+      const cat = p.category_name || 'General';
+      if (!valuations[cat]) {
+        valuations[cat] = { count: 0, cost: 0, retail: 0 };
+      }
+      valuations[cat].count += 1;
+      valuations[cat].cost += p.stock_on_hand * (p.buying_price_kes || 0);
+      valuations[cat].retail += p.stock_on_hand * p.selling_price_kes;
+    }
+    return valuations;
+  }, [products]);
 
   const handlePrintZReport = () => {
     window.print();

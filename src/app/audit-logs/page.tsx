@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { localDb } from '@/lib/dexie/db';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { formatDate } from '@/lib/utils/formatters';
@@ -24,11 +24,21 @@ export default function AuditLogsPage() {
   const [actionFilter, setActionFilter] = useState('All');
 
   useEffect(() => {
+    let cancelled = false;
     const buildAuditStream = async () => {
+      // Concurrently load sales, stock movements, repayments, and returns to avoid serial loading
+      const [sales, movs, repays, rets] = await Promise.all([
+        localDb.sales.toArray(),
+        localDb.stockMovements.toArray(),
+        localDb.customerRepayments.toArray(),
+        localDb.returns.toArray(),
+      ]);
+
+      if (cancelled) return;
+
       const result: LocalAuditItem[] = [];
 
       // Collect sales
-      const sales = await localDb.sales.toArray();
       for (const s of sales) {
         result.push({
           id: `audit_sale_${s.id}`,
@@ -42,7 +52,6 @@ export default function AuditLogsPage() {
       }
 
       // Collect stock movements
-      const movs = await localDb.stockMovements.toArray();
       for (const m of movs) {
         result.push({
           id: `audit_mov_${m.id}`,
@@ -56,7 +65,6 @@ export default function AuditLogsPage() {
       }
 
       // Collect repayments
-      const repays = await localDb.customerRepayments.toArray();
       for (const r of repays) {
         result.push({
           id: `audit_repay_${r.id}`,
@@ -70,7 +78,6 @@ export default function AuditLogsPage() {
       }
 
       // Collect returns
-      const rets = await localDb.returns.toArray();
       for (const ret of rets) {
         result.push({
           id: `audit_ret_${ret.id}`,
@@ -88,19 +95,24 @@ export default function AuditLogsPage() {
     };
 
     buildAuditStream();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const filteredLogs = logs.filter((l) => {
-    const matchAction = actionFilter === 'All' || l.action === actionFilter;
+  const filteredLogs = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
-    const matchSearch =
-      !q ||
-      l.details.toLowerCase().includes(q) ||
-      l.record_id.toLowerCase().includes(q) ||
-      l.actor_name.toLowerCase().includes(q) ||
-      l.table_name.toLowerCase().includes(q);
-    return matchAction && matchSearch;
-  });
+    return logs.filter((l) => {
+      const matchAction = actionFilter === 'All' || l.action === actionFilter;
+      const matchSearch =
+        !q ||
+        l.details.toLowerCase().includes(q) ||
+        l.record_id.toLowerCase().includes(q) ||
+        l.actor_name.toLowerCase().includes(q) ||
+        l.table_name.toLowerCase().includes(q);
+      return matchAction && matchSearch;
+    });
+  }, [logs, actionFilter, searchQuery]);
 
   return (
     <div className="space-y-6">

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -48,8 +48,15 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({ isOpen, onClos
     setIsSyncing(false);
   };
 
-  const pendingCount = queueItems.filter((i) => i.status === 'pending').length;
-  const failedCount = queueItems.filter((i) => i.status === 'failed').length;
+  const { pendingCount, failedCount } = useMemo(() => {
+    let pending = 0;
+    let failed = 0;
+    for (const i of queueItems) {
+      if (i.status === 'pending') pending++;
+      else if (i.status === 'failed') failed++;
+    }
+    return { pendingCount: pending, failedCount: failed };
+  }, [queueItems]);
 
   return (
     <Modal
