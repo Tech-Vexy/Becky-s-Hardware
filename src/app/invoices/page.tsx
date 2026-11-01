@@ -77,8 +77,8 @@ export default function InvoicesPage() {
     // Concurrently load invoices, customers, and active products
     const [invs, custs, prods] = await Promise.all([
       localDb.invoices.orderBy('created_at').reverse().toArray(),
-      localDb.customers.where('active').equals(1).toArray(),
-      localDb.products.where('active').equals(1).toArray(),
+      localDb.customers.filter((x) => x.active === true).toArray(),
+      localDb.products.filter((x) => x.active === true).toArray(),
     ]);
 
     setInvoices(invs);

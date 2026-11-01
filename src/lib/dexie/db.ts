@@ -96,18 +96,38 @@ export class HardwareStoreDexieDB extends Dexie {
     this.version(2).stores({
       invoices: '&id, invoice_number, customer_id, status, issue_date, due_date, created_at',
     });
+
+    this.version(3).stores({
+      syncQueue: '++id, client_id, &idempotency_key, operation_type, status, created_at',
+    }).upgrade(tx => {
+      // Add conflict_data field to existing syncQueue items
+      return tx.table('syncQueue').toCollection().modify(item => {
+        if (!item.conflict_data) {
+          item.conflict_data = null;
+        }
+      });
+    });
   }
 }
 
 export const localDb = new HardwareStoreDexieDB();
 
+let initializationPromise: Promise<void> | null = null;
+
 /**
  * Initializes and bootstraps the IndexedDB virtual replica with the Kenyan hardware catalogue
- * if not already initialized.
+ * if not already initialized. Concurrent callers share the same in-flight promise so pages
+ * never read the database before seeding has finished.
  */
-export async function initializeLocalStoreDatabase(): Promise<void> {
-  if (typeof window === 'undefined') return;
+export function initializeLocalStoreDatabase(): Promise<void> {
+  if (typeof window === 'undefined') return Promise.resolve();
+  if (!initializationPromise) {
+    initializationPromise = seedLocalStoreDatabase();
+  }
+  return initializationPromise;
+}
 
+async function seedLocalStoreDatabase(): Promise<void> {
   try {
     const productsCount = await localDb.products.count();
     if (productsCount === 0) {

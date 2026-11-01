@@ -49,8 +49,8 @@ export default function PurchasesPage() {
     // Concurrently load purchases, suppliers, and active products
     const [pList, sList, prList] = await Promise.all([
       localDb.purchases.orderBy('created_at').reverse().toArray(),
-      localDb.suppliers.where('active').equals(1).toArray(),
-      localDb.products.where('active').equals(1).toArray(),
+      localDb.suppliers.filter((x) => x.active === true).toArray(),
+      localDb.products.filter((x) => x.active === true).toArray(),
     ]);
 
     setPurchases(pList);

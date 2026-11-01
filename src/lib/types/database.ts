@@ -352,9 +352,14 @@ export interface SyncQueueItem {
   idempotency_key: string;
   operation_type: SyncOperationType;
   payload: any;
-  status: 'pending' | 'syncing' | 'failed' | 'synced';
+  status: 'pending' | 'syncing' | 'failed' | 'synced' | 'conflict';
   retry_count: number;
   last_error?: string | null;
+  conflict_data?: {
+    local_version: any;
+    remote_version: any;
+    conflict_type: 'version_mismatch' | 'duplicate' | 'validation';
+  } | null;
   created_at: string;
   synced_at?: string | null;
 }

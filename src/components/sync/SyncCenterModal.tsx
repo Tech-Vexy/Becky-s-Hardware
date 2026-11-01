@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/Badge';
 import { localDb } from '@/lib/dexie/db';
 import { syncEngine } from '@/lib/sync/syncEngine';
 import type { SyncQueueItem } from '@/lib/types/database';
-import { RefreshCw, CheckCircle2, AlertTriangle, Clock, CloudOff, Wifi } from 'lucide-react';
+import { RefreshCw, CheckCircle2, AlertTriangle, Clock, CloudOff, Wifi, ArrowRight, XCircle } from 'lucide-react';
 import { formatDate } from '@/lib/utils/formatters';
 
 interface SyncCenterModalProps {
@@ -48,14 +48,55 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({ isOpen, onClos
     setIsSyncing(false);
   };
 
-  const { pendingCount, failedCount } = useMemo(() => {
+  const handleRetryFailed = async () => {
+    setIsSyncing(true);
+    // Reset failed items to pending for retry
+    const failedItems = queueItems.filter(i => i.status === 'failed' || i.status === 'conflict');
+    for (const item of failedItems) {
+      await localDb.syncQueue.update(item.id!, {
+        status: 'pending',
+        retry_count: 0,
+        last_error: null,
+        conflict_data: null,
+      });
+    }
+    await syncEngine.syncPendingQueue();
+    await loadQueue();
+    setIsSyncing(false);
+  };
+
+  const handleResolveConflict = async (item: SyncQueueItem, action: 'keep_local' | 'mark_synced') => {
+    setIsSyncing(true);
+    if (action === 'keep_local') {
+      // Reset to pending for retry
+      await localDb.syncQueue.update(item.id!, {
+        status: 'pending',
+        retry_count: 0,
+        last_error: null,
+        conflict_data: null,
+      });
+    } else if (action === 'mark_synced') {
+      // Mark as synced without re-uploading (data already exists remotely)
+      await localDb.syncQueue.update(item.id!, {
+        status: 'synced',
+        synced_at: new Date().toISOString(),
+        conflict_data: null,
+      });
+    }
+    await loadQueue();
+    setIsSyncing(false);
+  };
+
+  const { pendingCount, failedCount, conflictCount } = useMemo(() => {
     let pending = 0;
     let failed = 0;
+    let conflict = 0;
     for (const i of queueItems) {
       if (i.status === 'pending') pending++;
       else if (i.status === 'failed') failed++;
+      else if (i.status === 'conflict') conflict++;
     }
-    return { pendingCount: pending, failedCount: failed };
+    return { pendingCount: pending, failedCount: failed, conflictCount: conflict };
   }, [queueItems]);
 
   return (
@@ -68,7 +109,7 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({ isOpen, onClos
     >
       <div className="space-y-6">
         {/* Status Header */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <div className="rounded-xl border border-slate-200 p-3 bg-slate-50 flex items-center justify-between">
             <div>
               <div className="text-xs text-slate-500 font-medium">Network State</div>
@@ -76,12 +117,12 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({ isOpen, onClos
                 {isOnline ? (
                   <>
                     <Wifi className="h-4 w-4 text-emerald-600" />
-                    <span className="text-emerald-700">Online & Connected</span>
+                    <span className="text-emerald-700">Online</span>
                   </>
                 ) : (
                   <>
                     <CloudOff className="h-4 w-4 text-amber-600" />
-                    <span className="text-amber-700">Offline / Standalone</span>
+                    <span className="text-amber-700">Offline</span>
                   </>
                 )}
               </div>
@@ -99,11 +140,35 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({ isOpen, onClos
 
           <div className="rounded-xl border border-slate-200 p-3 bg-slate-50 flex items-center justify-between">
             <div>
-              <div className="text-xs text-slate-500 font-medium">Failed / Conflicts</div>
+              <div className="text-xs text-slate-500 font-medium">Failed</div>
               <div className="text-lg font-bold text-slate-900 mt-0.5">{failedCount} items</div>
             </div>
             <AlertTriangle className={`h-5 w-5 ${failedCount > 0 ? 'text-red-500' : 'text-slate-400'}`} />
           </div>
+
+          <div className="rounded-xl border border-slate-200 p-3 bg-slate-50 flex items-center justify-between">
+            <div>
+              <div className="text-xs text-slate-500 font-medium">Conflicts</div>
+              <div className="text-lg font-bold text-slate-900 mt-0.5">{conflictCount} items</div>
+            </div>
+            <XCircle className={`h-5 w-5 ${conflictCount > 0 ? 'text-orange-500' : 'text-slate-400'}`} />
+          </div>
+        </div>
+
+        {/* Last Sync Info */}
+        <div className="flex items-center justify-between text-xs">
+          <div className="text-slate-500">
+            Last sync: <span className="font-semibold text-slate-700">
+              {syncEngine.getStatus().lastSyncTime
+                ? formatDate(syncEngine.getStatus().lastSyncTime!)
+                : 'Never'}
+            </span>
+          </div>
+          {syncEngine.getStatus().lastError && (
+            <div className="text-red-600 font-medium">
+              Error: {syncEngine.getStatus().lastError}
+            </div>
+          )}
         </div>
 
         {/* Sync Action */}
@@ -114,16 +179,30 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({ isOpen, onClos
               All transactions are queued with unique idempotency keys to prevent duplicate checkout or stock loss.
             </p>
           </div>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={handleManualSync}
-            isLoading={isSyncing}
-            className="flex items-center gap-1.5 whitespace-nowrap"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Sync Now
-          </Button>
+          <div className="flex items-center gap-2">
+            {(failedCount > 0 || conflictCount > 0) && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRetryFailed}
+                isLoading={isSyncing}
+                className="flex items-center gap-1.5 whitespace-nowrap"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Retry Issues
+              </Button>
+            )}
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleManualSync}
+              isLoading={isSyncing}
+              className="flex items-center gap-1.5 whitespace-nowrap"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Sync Now
+            </Button>
+          </div>
         </div>
 
         {/* Queue Table */}
@@ -171,6 +250,31 @@ export const SyncCenterModal: React.FC<SyncCenterModalProps> = ({ isOpen, onClos
                         <AlertTriangle className="h-3 w-3" />
                         Failed
                       </Badge>
+                    )}
+                    {item.status === 'conflict' && (
+                      <div className="flex flex-col gap-1">
+                        <Badge variant="warning" className="flex items-center gap-1 bg-orange-100 text-orange-800 border-orange-300">
+                          <XCircle className="h-3 w-3" />
+                          Conflict
+                        </Badge>
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => handleResolveConflict(item, 'keep_local')}
+                            className="text-[10px] text-blue-600 hover:text-blue-800 font-medium"
+                            title="Keep local version and retry"
+                          >
+                            Keep Local
+                          </button>
+                          <span className="text-slate-300">|</span>
+                          <button
+                            onClick={() => handleResolveConflict(item, 'mark_synced')}
+                            className="text-[10px] text-emerald-600 hover:text-emerald-800 font-medium"
+                            title="Mark as synced (already on server)"
+                          >
+                            Skip
+                          </button>
+                        </div>
+                      </div>
                     )}
                   </div>
                 </div>

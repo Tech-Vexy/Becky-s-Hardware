@@ -57,7 +57,7 @@ export default function CustomersPage() {
 
   const loadData = async () => {
     const [custList, repayList, salesList] = await Promise.all([
-      localDb.customers.where('active').equals(1).toArray(),
+      localDb.customers.filter((x) => x.active === true).toArray(),
       localDb.customerRepayments.orderBy('received_at').reverse().toArray(),
       localDb.sales.where('status').equals('completed').toArray(),
     ]);

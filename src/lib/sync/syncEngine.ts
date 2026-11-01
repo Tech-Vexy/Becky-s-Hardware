@@ -384,6 +384,24 @@ class SyncEngine {
             if (syncError) {
               // Handle conflict or validation error
               console.error(`Sync RPC error on ${item.idempotency_key}:`, syncError);
+
+              // Check for duplicate sales by receipt number
+              if (item.operation_type === 'checkout' && syncError.message?.includes('duplicate')) {
+                // This is a conflict - the sale may already exist remotely
+                await localDb.syncQueue.update(item.id!, {
+                  status: 'conflict',
+                  last_error: syncError.message,
+                  conflict_data: {
+                    local_version: item.payload,
+                    remote_version: null, // Will be fetched by conflict resolution UI
+                    conflict_type: 'duplicate',
+                  },
+                  retry_count: item.retry_count + 1,
+                });
+                failedCount++;
+                continue;
+              }
+
               if (item.retry_count >= 5) {
                 await localDb.syncQueue.update(item.id!, {
                   status: 'failed',

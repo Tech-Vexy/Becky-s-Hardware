@@ -26,7 +26,7 @@ export default function SuppliersPage() {
   });
 
   const loadSuppliers = async () => {
-    const list = await localDb.suppliers.where('active').equals(1).toArray();
+    const list = await localDb.suppliers.filter((x) => x.active === true).toArray();
     setSuppliers(list);
   };
 

@@ -98,7 +98,7 @@ export default function InventoryPage() {
     // Concurrently fetch movements, products, and categories
     const [movs, prods, cats] = await Promise.all([
       localDb.stockMovements.orderBy('created_at').reverse().toArray(),
-      localDb.products.where('active').equals(1).toArray(),
+      localDb.products.filter((x) => x.active === true).toArray(),
       localDb.categories.toArray(),
     ]);
 

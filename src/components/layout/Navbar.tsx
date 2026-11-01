@@ -75,7 +75,7 @@ export const Navbar: React.FC = () => {
                 ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
                 : 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100'
             }`}
-            title="Click to view synchronization queue"
+            title={`Last sync: ${syncStatus.lastSyncTime ? new Date(syncStatus.lastSyncTime).toLocaleTimeString() : 'Never'}`}
           >
             {syncStatus.isOnline ? (
               <Wifi className="h-3.5 w-3.5 text-emerald-600" />
@@ -89,6 +89,9 @@ export const Navbar: React.FC = () => {
               </span>
             )}
             {syncStatus.isSyncing && <RefreshCw className="h-3 w-3 animate-spin text-amber-600" />}
+            {syncStatus.lastError && (
+              <div className="h-2 w-2 rounded-full bg-red-500" title={syncStatus.lastError} />
+            )}
           </button>
 
           {/* Realtime Notification Center Bell */}

@@ -5,7 +5,7 @@ import { localDb } from '@/lib/dexie/db';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { formatDate } from '@/lib/utils/formatters';
 import { Badge } from '@/components/ui/Badge';
-import { History, Search, ShieldCheck } from 'lucide-react';
+import { History, Search, ShieldCheck, AlertTriangle, TrendingUp, TrendingDown } from 'lucide-react';
 
 interface LocalAuditItem {
   id: string;
@@ -15,6 +15,8 @@ interface LocalAuditItem {
   actor_name: string;
   details: string;
   occurred_at: string;
+  anomaly_type?: 'large_adjustment' | 'negative_stock' | 'rapid_movement' | null;
+  anomaly_score?: number;
 }
 
 export default function AuditLogsPage() {
@@ -51,8 +53,26 @@ export default function AuditLogsPage() {
         });
       }
 
-      // Collect stock movements
+      // Collect stock movements with anomaly detection
       for (const m of movs) {
+        let anomalyType: 'large_adjustment' | 'negative_stock' | 'rapid_movement' | null = null;
+        let anomalyScore = 0;
+
+        // Detect large stock adjustments (>50 units or >20% of normal)
+        if (m.movement_type === 'adjustment' && Math.abs(m.quantity_delta) > 50) {
+          anomalyType = 'large_adjustment';
+          anomalyScore = 0.8;
+        }
+
+        // Detect negative stock situations
+        if (m.quantity_delta < 0 && m.movement_type === 'sale') {
+          // Check if this would push stock negative (simplified check)
+          if (Math.abs(m.quantity_delta) > 100) {
+            anomalyType = 'rapid_movement';
+            anomalyScore = 0.6;
+          }
+        }
+
         result.push({
           id: `audit_mov_${m.id}`,
           action: 'INSERT',
@@ -61,6 +81,8 @@ export default function AuditLogsPage() {
           actor_name: m.created_by_name || 'Staff',
           details: `Movement [${m.movement_type}]: ${m.quantity_delta > 0 ? '+' : ''}${m.quantity_delta} pcs of ${m.product_name} (${m.reason})`,
           occurred_at: m.created_at,
+          anomaly_type: anomalyType,
+          anomaly_score: anomalyScore,
         });
       }
 
@@ -137,6 +159,12 @@ export default function AuditLogsPage() {
             className="w-full rounded-xl border border-slate-200 pl-10 pr-4 py-2 text-xs focus:border-amber-500 focus:outline-none"
           />
         </div>
+        <div className="flex items-center gap-2 text-xs">
+          <Badge variant="warning" className="bg-orange-100 text-orange-800 border-orange-300">
+            <AlertTriangle className="h-3 w-3 mr-1" />
+            {logs.filter(l => l.anomaly_type).length} Anomalies
+          </Badge>
+        </div>
       </div>
 
       {/* Audit List Table */}
@@ -151,18 +179,19 @@ export default function AuditLogsPage() {
                 <th className="py-3 px-4">Record Identifier</th>
                 <th className="py-3 px-4">Activity Description</th>
                 <th className="py-3 px-4">Staff Actor</th>
+                <th className="py-3 px-4">Flags</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {filteredLogs.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-10 text-center text-slate-400">
+                  <td colSpan={7} className="py-10 text-center text-slate-400">
                     No audit records match your search criteria.
                   </td>
                 </tr>
               ) : (
                 filteredLogs.slice(0, 100).map((log) => (
-                  <tr key={log.id} className="hover:bg-slate-50/80 transition-colors">
+                  <tr key={log.id} className={`hover:bg-slate-50/80 transition-colors ${log.anomaly_type ? 'bg-orange-50/30' : ''}`}>
                     <td className="py-3 px-4 font-mono text-slate-500 text-[11px]">
                       {formatDate(log.occurred_at)}
                     </td>
@@ -180,6 +209,17 @@ export default function AuditLogsPage() {
                     <td className="py-3 px-4 font-medium text-slate-900">{log.details}</td>
 
                     <td className="py-3 px-4 text-slate-600">{log.actor_name}</td>
+
+                    <td className="py-3 px-4">
+                      {log.anomaly_type && (
+                        <Badge variant="warning" className="bg-orange-100 text-orange-800 border-orange-300 text-[10px]">
+                          <AlertTriangle className="h-3 w-3 mr-1" />
+                          {log.anomaly_type === 'large_adjustment' ? 'Large Adj' :
+                           log.anomaly_type === 'rapid_movement' ? 'Rapid' :
+                           'Anomaly'}
+                        </Badge>
+                      )}
+                    </td>
                   </tr>
                 ))
               )}

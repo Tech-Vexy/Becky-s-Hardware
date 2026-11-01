@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { localDb, type DraftCartItem } from '@/lib/dexie/db';
+import { localDb, initializeLocalStoreDatabase, type DraftCartItem } from '@/lib/dexie/db';
 import { syncEngine } from '@/lib/sync/syncEngine';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { useNotifications } from '@/lib/notifications/NotificationContext';
@@ -136,10 +136,12 @@ export default function POSPage() {
     let cancelled = false;
     const loadData = async () => {
       try {
+        // Ensure the local catalogue is seeded before the first read
+        await initializeLocalStoreDatabase();
         const todayStr = new Date().toISOString().slice(0, 10);
         const [prods, custs, draft, filteredSales] = await Promise.all([
-          localDb.products.where('active').equals(1).toArray(),
-          localDb.customers.where('active').equals(1).toArray(),
+          localDb.products.filter((x) => x.active === true).toArray(),
+          localDb.customers.filter((x) => x.active === true).toArray(),
           localDb.draftCart.get('current_pos_cart').catch(() => null),
           localDb.sales
             .where('created_at')
@@ -495,7 +497,7 @@ export default function POSPage() {
       );
 
       // 5. Refresh POS product list
-      const refreshed = await localDb.products.where('active').equals(1).toArray();
+      const refreshed = await localDb.products.filter((x) => x.active === true).toArray();
       setProducts(refreshed);
 
       showToast(
@@ -567,7 +569,7 @@ export default function POSPage() {
 
       syncEngine.queueOperation('product_upsert', newProd).catch(console.error);
 
-      const refreshed = await localDb.products.where('active').equals(1).toArray();
+      const refreshed = await localDb.products.filter((x) => x.active === true).toArray();
       setProducts(refreshed);
 
       // Auto-add to cart for the customer waiting at the counter!
@@ -600,6 +602,58 @@ export default function POSPage() {
   // Checkout Handler
   const handleOpenCheckout = () => {
     if (cart.length === 0) return;
+
+    // Pre-checkout validation
+    const warnings: string[] = [];
+    const errors: string[] = [];
+
+    for (const item of cart) {
+      // Check for insufficient stock
+      if (item.quantity > item.stock_on_hand) {
+        errors.push(`${item.product_name}: Requested ${item.quantity} but only ${item.stock_on_hand} in stock`);
+      }
+
+      // Check for invalid quantities (negative or zero)
+      if (item.quantity <= 0) {
+        errors.push(`${item.product_name}: Invalid quantity ${item.quantity}`);
+      }
+
+      // Check for negative prices
+      if (item.selling_price_kes < 0) {
+        errors.push(`${item.product_name}: Negative price ${item.selling_price_kes}`);
+      }
+
+      // Check for unusually large discounts or price changes
+      const product = products.find(p => p.id === item.product_id);
+      if (product && item.selling_price_kes < product.minimum_selling_price_kes) {
+        warnings.push(`${item.product_name}: Price below minimum selling price`);
+      }
+
+      // Check for large quantities that might be errors
+      if (item.quantity > 1000) {
+        warnings.push(`${item.product_name}: Very large quantity (${item.quantity}) - verify correct`);
+      }
+    }
+
+    if (errors.length > 0) {
+      showToast(
+        'system',
+        'Cannot Complete Sale',
+        errors.join('; '),
+        '/pos'
+      );
+      return;
+    }
+
+    if (warnings.length > 0) {
+      showToast(
+        'system',
+        'Sale Warnings',
+        warnings.join('; ') + ' - Proceed with caution',
+        '/pos'
+      );
+    }
+
     setCashTendered(cartTotal.toString());
     setMpesaReference('');
     setPaymentNotes('');
@@ -678,7 +732,7 @@ export default function POSPage() {
       const result = await syncEngine.processCheckout(checkoutPayload);
 
       // Refresh product list stock
-      const updatedProds = await localDb.products.where('active').equals(1).toArray();
+      const updatedProds = await localDb.products.filter((x) => x.active === true).toArray();
       setProducts(updatedProds);
 
       const saleData = {
@@ -800,6 +854,28 @@ export default function POSPage() {
     if (isNaN(newPrice) || newPrice < 0) {
       showToast('system', 'Invalid Price', 'Please enter a valid non-negative price.', '/pos');
       return;
+    }
+
+    // Check for unusually large price changes
+    const priceChangePercent = ((newPrice - priceEditingItem.selling_price_kes) / priceEditingItem.selling_price_kes) * 100;
+    if (Math.abs(priceChangePercent) > 50) {
+      showToast(
+        'system',
+        'Large Price Change',
+        `Price change of ${priceChangePercent.toFixed(1)}% detected. Verify this is correct.`,
+        '/pos'
+      );
+    }
+
+    // Check if below minimum selling price
+    const product = products.find(p => p.id === priceEditingItem.product_id);
+    if (product && newPrice < product.minimum_selling_price_kes) {
+      showToast(
+        'system',
+        'Price Below Minimum',
+        `New price is below minimum selling price of ${formatKES(product.minimum_selling_price_kes)}. Admin approval may be required.`,
+        '/pos'
+      );
     }
 
     // 1. Update in active cart
@@ -1370,7 +1446,8 @@ export default function POSPage() {
                   <div className="flex items-center border border-slate-200 rounded-lg bg-white overflow-hidden shadow-2xs">
                     <button
                       onClick={() => updateCartQty(item.product_id, item.quantity - (item.allow_decimal ? 0.5 : 1))}
-                      className="p-1 hover:bg-slate-100 text-slate-600"
+                      className="p-2 hover:bg-slate-100 text-slate-600 active:bg-slate-200 min-w-8 min-h-8"
+                      aria-label="Decrease quantity"
                     >
                       <Minus className="h-3 w-3" />
                     </button>
@@ -1379,7 +1456,8 @@ export default function POSPage() {
                     </span>
                     <button
                       onClick={() => updateCartQty(item.product_id, item.quantity + (item.allow_decimal ? 0.5 : 1))}
-                      className="p-1 hover:bg-slate-100 text-slate-600"
+                      className="p-2 hover:bg-slate-100 text-slate-600 active:bg-slate-200 min-w-8 min-h-8"
+                      aria-label="Increase quantity"
                     >
                       <Plus className="h-3 w-3" />
                     </button>
@@ -1393,7 +1471,8 @@ export default function POSPage() {
 
                   <button
                     onClick={() => updateCartQty(item.product_id, 0)}
-                    className="p-1 text-slate-300 hover:text-red-600"
+                    className="p-2 text-slate-300 hover:text-red-600 active:text-red-700 min-w-8 min-h-8"
+                    aria-label="Remove item"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
@@ -2212,7 +2291,7 @@ export default function POSPage() {
                               <button
                                 type="button"
                                 onClick={() => setSelectedSaleDetail(isSelected ? null : s)}
-                                className="p-1 rounded hover:bg-slate-100 text-slate-500 hover:text-slate-800"
+                                className="p-2 rounded hover:bg-slate-100 text-slate-500 hover:text-slate-800 min-w-8 min-h-8"
                                 title="View items"
                               >
                                 <Eye className="h-3.5 w-3.5" />
@@ -2220,7 +2299,7 @@ export default function POSPage() {
                               <button
                                 type="button"
                                 onClick={() => handleReprintPastReceipt(s)}
-                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-[10px] border border-amber-200 transition-colors"
+                                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-[10px] border border-amber-200 transition-colors min-h-8"
                                 title="Reprint Receipt"
                               >
                                 <Printer className="h-3 w-3" />

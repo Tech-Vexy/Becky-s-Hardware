@@ -17,6 +17,10 @@ import {
   Coins,
   Building,
   CheckCircle2,
+  AlertTriangle,
+  Smartphone,
+  CreditCard,
+  Calendar,
 } from 'lucide-react';
 import type { Sale, Expense, CustomerRepayment, Product } from '@/lib/types/database';
 
@@ -35,7 +39,7 @@ export default function ReportsPage() {
         localDb.sales.where('status').equals('completed').toArray(),
         localDb.expenses.toArray(),
         localDb.customerRepayments.toArray(),
-        localDb.products.where('active').equals(1).toArray(),
+        localDb.products.filter((x) => x.active === true).toArray(),
       ]);
 
       if (cancelled) return;
@@ -86,6 +90,80 @@ export default function ReportsPage() {
       netCashInDrawer: cashFromSales + cashRepay - cashExp,
     };
   }, [sales, repayments, expenses]);
+
+  // Payment type breakdown for daily reconciliation
+  const paymentBreakdown = useMemo(() => {
+    const breakdown: Record<string, { count: number; amount: number }> = {
+      cash: { count: 0, amount: 0 },
+      mpesa: { count: 0, amount: 0 },
+      card: { count: 0, amount: 0 },
+      credit: { count: 0, amount: 0 },
+      bank_transfer: { count: 0, amount: 0 },
+      cheque: { count: 0, amount: 0 },
+      other: { count: 0, amount: 0 },
+    };
+
+    for (const s of sales) {
+      if (s.payments) {
+        for (const p of s.payments) {
+          const method = p.method || 'other';
+          if (!breakdown[method]) {
+            breakdown[method] = { count: 0, amount: 0 };
+          }
+          breakdown[method].count += 1;
+          breakdown[method].amount += p.amount_kes;
+        }
+      }
+    }
+
+    return breakdown;
+  }, [sales]);
+
+  // Today's sales specifically
+  const todaySales = useMemo(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    return sales.filter(s => s.created_at.startsWith(todayStr));
+  }, [sales]);
+
+  // Issues detection
+  const issues = useMemo(() => {
+    const detected: string[] = [];
+
+    // Check for voided sales
+    const voidedCount = sales.filter(s => s.status === 'voided').length;
+    if (voidedCount > 0) {
+      detected.push(`${voidedCount} voided sales detected`);
+    }
+
+    // Check for credit sales
+    const creditAmount = paymentBreakdown.credit?.amount || 0;
+    if (creditAmount > 0) {
+      detected.push(`Credit sales: ${formatKES(creditAmount)} outstanding`);
+    }
+
+    // Check for large single transactions
+    const largeTransactions = sales.filter(s => s.total_kes > 50000);
+    if (largeTransactions.length > 0) {
+      detected.push(`${largeTransactions.length} transactions over KES 50,000`);
+    }
+
+    // Check for unverified M-Pesa payments
+    let unverifiedMpesa = 0;
+    for (const s of sales) {
+      if (s.payments) {
+        for (const p of s.payments) {
+          if (p.method === 'mpesa' && p.verification_status === 'unverified') {
+            unverifiedMpesa++;
+          }
+        }
+      }
+    }
+    if (unverifiedMpesa > 0) {
+      detected.push(`${unverifiedMpesa} unverified M-Pesa payments`);
+    }
+
+    return detected;
+  }, [sales, paymentBreakdown]);
 
   // Memoized inventory valuation by category
   const categoryValuations = useMemo(() => {
@@ -183,6 +261,92 @@ export default function ReportsPage() {
             <span className="font-bold text-slate-900">{sales.length} transactions</span>
           </div>
         </div>
+      </div>
+
+      {/* Daily Summary with Payment Reconciliation */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-base font-bold text-slate-900">Daily Payment Reconciliation</h3>
+            <p className="text-xs text-slate-500">
+              Breakdown of today's sales by payment method for end-of-day verification.
+            </p>
+          </div>
+          <Badge variant="default">{todaySales.length} Transactions Today</Badge>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="bg-emerald-50 p-3 rounded-xl border border-emerald-200">
+            <div className="flex items-center gap-2 mb-1">
+              <Coins className="h-4 w-4 text-emerald-700" />
+              <span className="text-xs font-bold text-emerald-800">Cash</span>
+            </div>
+            <div className="text-lg font-black text-emerald-900">{formatKES(paymentBreakdown.cash?.amount || 0)}</div>
+            <div className="text-[10px] text-emerald-600">{paymentBreakdown.cash?.count || 0} txns</div>
+          </div>
+
+          <div className="bg-green-50 p-3 rounded-xl border border-green-200">
+            <div className="flex items-center gap-2 mb-1">
+              <Smartphone className="h-4 w-4 text-green-700" />
+              <span className="text-xs font-bold text-green-800">M-Pesa</span>
+            </div>
+            <div className="text-lg font-black text-green-900">{formatKES(paymentBreakdown.mpesa?.amount || 0)}</div>
+            <div className="text-[10px] text-green-600">{paymentBreakdown.mpesa?.count || 0} txns</div>
+          </div>
+
+          <div className="bg-blue-50 p-3 rounded-xl border border-blue-200">
+            <div className="flex items-center gap-2 mb-1">
+              <CreditCard className="h-4 w-4 text-blue-700" />
+              <span className="text-xs font-bold text-blue-800">Card</span>
+            </div>
+            <div className="text-lg font-black text-blue-900">{formatKES(paymentBreakdown.card?.amount || 0)}</div>
+            <div className="text-[10px] text-blue-600">{paymentBreakdown.card?.count || 0} txns</div>
+          </div>
+
+          <div className="bg-purple-50 p-3 rounded-xl border border-purple-200">
+            <div className="flex items-center gap-2 mb-1">
+              <Users className="h-4 w-4 text-purple-700" />
+              <span className="text-xs font-bold text-purple-800">Credit</span>
+            </div>
+            <div className="text-lg font-black text-purple-900">{formatKES(paymentBreakdown.credit?.amount || 0)}</div>
+            <div className="text-[10px] text-purple-600">{paymentBreakdown.credit?.count || 0} txns</div>
+          </div>
+
+          <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2 mb-1">
+              <Building className="h-4 w-4 text-slate-700" />
+              <span className="text-xs font-bold text-slate-800">Bank</span>
+            </div>
+            <div className="text-lg font-black text-slate-900">{formatKES(paymentBreakdown.bank_transfer?.amount || 0)}</div>
+            <div className="text-[10px] text-slate-600">{paymentBreakdown.bank_transfer?.count || 0} txns</div>
+          </div>
+
+          <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2 mb-1">
+              <Receipt className="h-4 w-4 text-slate-700" />
+              <span className="text-xs font-bold text-slate-800">Other</span>
+            </div>
+            <div className="text-lg font-black text-slate-900">{formatKES(paymentBreakdown.other?.amount || 0)}</div>
+            <div className="text-[10px] text-slate-600">{paymentBreakdown.other?.count || 0} txns</div>
+          </div>
+        </div>
+
+        {issues.length > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle className="h-4 w-4 text-amber-700" />
+              <span className="text-sm font-bold text-amber-900">Issues Requiring Attention</span>
+            </div>
+            <ul className="space-y-1">
+              {issues.map((issue, idx) => (
+                <li key={idx} className="text-xs text-amber-800 flex items-start gap-2">
+                  <span className="text-amber-500">•</span>
+                  {issue}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       {/* Inventory Stock Valuation by Category */}

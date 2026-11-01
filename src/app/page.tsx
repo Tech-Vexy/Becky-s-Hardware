@@ -41,7 +41,7 @@ export default function DashboardPage() {
           .filter((s) => s.status === 'completed')
           .toArray(),
         localDb.sales.orderBy('created_at').reverse().limit(10).toArray(),
-        localDb.products.where('active').equals(1).toArray(),
+        localDb.products.filter((x) => x.active === true).toArray(),
         localDb.customers.toArray(),
       ]);
 
