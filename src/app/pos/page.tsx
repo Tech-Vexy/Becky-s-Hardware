@@ -869,7 +869,7 @@ export default function POSPage() {
 
     // Check if below minimum selling price
     const product = products.find(p => p.id === priceEditingItem.product_id);
-    if (product && newPrice < product.minimum_selling_price_kes) {
+    if (product && product.minimum_selling_price_kes != null && newPrice < product.minimum_selling_price_kes) {
       showToast(
         'system',
         'Price Below Minimum',
