@@ -625,7 +625,7 @@ export default function POSPage() {
 
       // Check for unusually large discounts or price changes
       const product = products.find(p => p.id === item.product_id);
-      if (product && item.selling_price_kes < product.minimum_selling_price_kes) {
+      if (product && product.minimum_selling_price_kes !== null && item.selling_price_kes < product.minimum_selling_price_kes) {
         warnings.push(`${item.product_name}: Price below minimum selling price`);
       }
 
