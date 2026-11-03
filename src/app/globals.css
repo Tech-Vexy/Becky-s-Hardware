@@ -4,83 +4,373 @@
 
 @layer base {
   :root {
-    --background: 210 40% 98%;
-    --foreground: 222.2 84% 4.9%;
+    /* Core palette */
+    --background: 210 20% 98%;
+    --foreground: 222 47% 8%;
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 222 47% 8%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 38 92% 50%; /* Hardware Amber */
+    --popover-foreground: 222 47% 8%;
+
+    /* Brand: Hardware Amber */
+    --primary: 38 92% 50%;
     --primary-foreground: 48 96% 10%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
+
+    --secondary: 210 20% 95%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 20% 94%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 38 92% 95%;
+    --accent-foreground: 38 92% 20%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 32% 90%;
+    --input: 214 32% 90%;
     --ring: 38 92% 50%;
-    --radius: 0.5rem;
+    --radius: 0.625rem;
+
+    /* Elevation shadows */
+    --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.04);
+    --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.04);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.04);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.07), 0 4px 6px -4px rgb(0 0 0 / 0.04);
+    --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.08), 0 8px 10px -6px rgb(0 0 0 / 0.04);
+    --shadow-glow-amber: 0 0 0 3px rgb(217 119 6 / 0.2);
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
+    --background: 222 47% 5%;
+    --foreground: 210 20% 96%;
+    --card: 222 47% 7%;
+    --card-foreground: 210 20% 96%;
+    --popover: 222 47% 7%;
+    --popover-foreground: 210 20% 96%;
     --primary: 38 92% 50%;
     --primary-foreground: 48 96% 10%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
+    --secondary: 217 33% 13%;
+    --secondary-foreground: 210 20% 96%;
+    --muted: 217 33% 13%;
+    --muted-foreground: 215 20% 60%;
+    --accent: 38 60% 15%;
+    --accent-foreground: 38 92% 70%;
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 210 20% 96%;
+    --border: 217 33% 16%;
+    --input: 217 33% 16%;
     --ring: 38 92% 50%;
   }
+}
+
+/* ─── Base Styles ──────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  -webkit-text-size-adjust: 100%;
+  tab-size: 4;
 }
 
 body {
   color: hsl(var(--foreground));
   background: hsl(var(--background));
-  font-feature-settings: "rlig" 1, "calt" 1;
+  font-size: 14px;
+  line-height: 1.6;
+  font-feature-settings: 'rlig' 1, 'calt' 1, 'ss01' 1, 'cv02' 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
-/* Custom scrollbars for high-speed POS item lists */
+/* Numeric tabular figures for all KES amounts and counters */
+.font-mono,
+[class*='font-black'],
+[class*='font-bold'] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Typography Scale ─────────────────────────────────── */
+
+h1 {
+  font-size: 1.75rem;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.03em;
+}
+h2 {
+  font-size: 1.375rem;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.025em;
+}
+h3 {
+  font-size: 1.125rem;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+h4 {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.015em;
+}
+h5, h6 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+
+/* ─── Scrollbars ────────────────────────────────────────── */
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
-
 ::-webkit-scrollbar-track {
   background: transparent;
 }
-
 ::-webkit-scrollbar-thumb {
   background: #cbd5e1;
   border-radius: 9999px;
 }
-
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
 
-/* Print specific styles */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* ─── Focus Styles ──────────────────────────────────────── */
+
+:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ─── Animations & Keyframes ────────────────────────────── */
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes spinner-spin {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes spinner-dash {
+  0% {
+    stroke-dasharray: 1, 150;
+    stroke-dashoffset: 0;
+  }
+  50% {
+    stroke-dasharray: 90, 150;
+    stroke-dashoffset: -35;
+  }
+  100% {
+    stroke-dasharray: 90, 150;
+    stroke-dashoffset: -124;
+  }
+}
+
+@keyframes shimmer-sweep {
+  0% {
+    transform: translateX(-120%);
+  }
+  60%, 100% {
+    transform: translateX(120%);
+  }
+}
+
+@keyframes shimmer-flow {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 16px -2px rgba(245, 158, 11, 0.35), 0 0 6px -1px rgba(245, 158, 11, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 28px 4px rgba(245, 158, 11, 0.65), 0 0 12px 1px rgba(245, 158, 11, 0.45);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.45; }
+}
+
+@keyframes pulse-fast {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1);    }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -800px 0; }
+  100% { background-position:  800px 0; }
+}
+
+/* ─── Utility Animation Classes ────────────────────────── */
+
+.animate-spin         { animation: spin 0.9s linear infinite; }
+.animate-spin-smooth  { animation: spin 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+.animate-spinner-dash { animation: spinner-dash 1.5s ease-in-out infinite; }
+.animate-pulse        { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+.animate-pulse-fast   { animation: pulse-fast 1s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+.animate-glow-pulse   { animation: glow-pulse 2.2s ease-in-out infinite; }
+.animate-fade-in      { animation: fadeIn 0.2s ease-out both; }
+.animate-slide-in     { animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.animate-slide-down   { animation: slideDown 0.2s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.animate-scale-in     { animation: scaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* ─── Authentic Skeleton & Shimmer Components ───────────── */
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background-color: #f1f5f9;
+  border-radius: 0.75rem;
+}
+
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.35) 25%,
+    rgba(255, 255, 255, 0.85) 50%,
+    rgba(255, 255, 255, 0.35) 75%,
+    transparent 100%
+  );
+  animation: shimmer-sweep 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  pointer-events: none;
+}
+
+.skeleton-dark {
+  position: relative;
+  overflow: hidden;
+  background-color: #1e293b;
+  border-radius: 0.75rem;
+}
+
+.skeleton-dark::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.04) 25%,
+    rgba(255, 255, 255, 0.16) 50%,
+    rgba(255, 255, 255, 0.04) 75%,
+    transparent 100%
+  );
+  animation: shimmer-sweep 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  pointer-events: none;
+}
+
+.shimmer-amber {
+  position: relative;
+  overflow: hidden;
+}
+
+.shimmer-amber::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    105deg,
+    transparent 20%,
+    rgba(251, 191, 36, 0.22) 42%,
+    rgba(255, 255, 255, 0.6) 50%,
+    rgba(251, 191, 36, 0.22) 58%,
+    transparent 80%
+  );
+  animation: shimmer-sweep 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  pointer-events: none;
+}
+
+.shimmer-progress {
+  background: linear-gradient(
+    90deg,
+    #b45309 0%,
+    #f59e0b 25%,
+    #fef08a 50%,
+    #f59e0b 75%,
+    #b45309 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer-flow 1.5s linear infinite;
+}
+
+/* ─── Glass Morphism Utilities ──────────────────────────── */
+
+.glass {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px) saturate(1.5);
+  -webkit-backdrop-filter: blur(12px) saturate(1.5);
+}
+
+.glass-dark {
+  background: rgba(15, 23, 42, 0.80);
+  backdrop-filter: blur(12px) saturate(1.3);
+  -webkit-backdrop-filter: blur(12px) saturate(1.3);
+}
+
+/* ─── Surface Elevation Utilities ──────────────────────── */
+
+.surface-1 { box-shadow: var(--shadow-xs); }
+.surface-2 { box-shadow: var(--shadow-sm); }
+.surface-3 { box-shadow: var(--shadow-md); }
+.surface-4 { box-shadow: var(--shadow-lg); }
+
+/* ─── Print Styles ──────────────────────────────────────── */
+
 @media print {
-  body {
-    background: #fff;
-    color: #000;
-  }
-  .no-print {
-    display: none !important;
-  }
+  body { background: #fff; color: #000; }
+  .no-print { display: none !important; }
 }

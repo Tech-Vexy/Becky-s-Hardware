@@ -46,25 +46,25 @@ export const Modal: React.FC<ModalProps> = ({
   }[maxWidth];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in">
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity"
+        className="fixed inset-0 bg-slate-900/70 backdrop-blur-md transition-opacity animate-fade-in"
         onClick={onClose}
       />
 
       {/* Modal Dialog */}
       <div
-        className={`relative w-full ${maxWidthClass} max-h-[90vh] overflow-y-auto rounded-2xl bg-white shadow-2xl border border-slate-200 z-10 flex flex-col`}
+        className={`relative w-full ${maxWidthClass} max-h-[90vh] overflow-y-auto rounded-3xl bg-white shadow-2xl border border-slate-200 z-10 flex flex-col animate-slide-in`}
       >
-        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5 bg-gradient-to-r from-slate-50 to-white">
           <div>
-            <h3 className="text-lg font-bold text-slate-900">{title}</h3>
-            {description && <p className="text-xs text-slate-500 mt-0.5">{description}</p>}
+            <h3 className="text-lg font-bold text-slate-900 tracking-tight">{title}</h3>
+            {description && <p className="text-xs text-slate-500 mt-1">{description}</p>}
           </div>
           <button
             onClick={onClose}
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+            className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-all duration-200 hover:shadow-sm"
           >
             <X className="h-5 w-5" />
           </button>

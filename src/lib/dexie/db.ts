@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie';
 import type {
   Product,
   ProductCategory,
+  ProductTag,
   Customer,
   Supplier,
   Sale,
@@ -61,6 +62,7 @@ export class HardwareStoreDexieDB extends Dexie {
   storeSettings!: Table<StoreSettings, string>;
   categories!: Table<ProductCategory, string>;
   products!: Table<Product, string>;
+  productTags!: Table<ProductTag, string>;
   customers!: Table<Customer, string>;
   customerRepayments!: Table<CustomerRepayment, string>;
   suppliers!: Table<Supplier, string>;
@@ -100,11 +102,27 @@ export class HardwareStoreDexieDB extends Dexie {
     this.version(3).stores({
       syncQueue: '++id, client_id, &idempotency_key, operation_type, status, created_at',
     }).upgrade(tx => {
-      // Add conflict_data field to existing syncQueue items
       return tx.table('syncQueue').toCollection().modify(item => {
         if (!item.conflict_data) {
           item.conflict_data = null;
         }
+      });
+    });
+
+    /**
+     * v4 — Digital product tagging
+     *  • New `productTags` table (global tag definitions)
+     *  • `products` gains a `*tags` multiEntry index so we can query
+     *    localDb.products.where('tags').equals(tagId) efficiently
+     */
+    this.version(4).stores({
+      products: '&id, sku, barcode, product_name, category_name, active, stock_on_hand, *tags',
+      productTags: '&id, label, created_at',
+    }).upgrade(async tx => {
+      // Backfill existing products with an empty tags array so the
+      // multiEntry index never sees undefined
+      await tx.table('products').toCollection().modify((p: Product) => {
+        if (!p.tags) p.tags = [];
       });
     });
   }

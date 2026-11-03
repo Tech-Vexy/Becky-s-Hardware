@@ -189,16 +189,31 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       // Add to floating toasts
       showToast(type, title, message, link);
 
-      // Trigger Web Browser Notification if permitted
+      // Trigger Native PWA Device Notification via ServiceWorkerRegistration
       if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-        try {
-          new Notification(title, {
-            body: message,
-            icon: '/icon-192.png',
-            tag: newNotif.id,
-          });
-        } catch {
-          // Ignore browser notification dispatch errors
+        const notifOptions = {
+          body: message,
+          icon: '/icon-192.png',
+          badge: '/icon-192.png',
+          tag: newNotif.id,
+          data: { url: link || '/' },
+          vibrate: [200, 100, 200],
+        };
+
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.ready
+            .then((registration) => {
+              return registration.showNotification(title, notifOptions as any);
+            })
+            .catch(() => {
+              try {
+                new Notification(title, notifOptions);
+              } catch {}
+            });
+        } else {
+          try {
+            new Notification(title, notifOptions);
+          } catch {}
         }
       }
     },

@@ -38,7 +38,8 @@ import {
   FileText,
   CalendarDays,
 } from 'lucide-react';
-import type { Product, Customer, PaymentMethod, StockMovement, Sale, Invoice, InvoiceItem } from '@/lib/types/database';
+import type { Product, Customer, PaymentMethod, StockMovement, Sale, Invoice, InvoiceItem, ProductTag } from '@/lib/types/database';
+import { TagPill } from '@/components/ui/TagInput';
 
 export default function POSPage() {
   const { user, role, hasRole, canAlterPrices, canManageInventory } = useAuth();
@@ -46,6 +47,8 @@ export default function POSPage() {
   const { showToast } = useNotifications();
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [allTags, setAllTags] = useState<ProductTag[]>([]);
+  const [selectedTagFilter, setSelectedTagFilter] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [highlightedIndex, setHighlightedIndex] = useState<number>(0);
@@ -155,6 +158,10 @@ export default function POSPage() {
 
         setProducts(prods);
         setCustomers(custs);
+
+        // Load product tags for filter pills and tile chips
+        localDb.productTags.toArray().then(setAllTags).catch(() => {});
+
         if (custs.length > 0 && !selectedCustomer) {
           setSelectedCustomer(custs[0]); // default to Walk-in
         }

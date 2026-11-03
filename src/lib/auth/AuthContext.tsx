@@ -1,14 +1,16 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { AppRole, Profile } from '@/lib/types/database';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase/client';
 import { syncEngine } from '@/lib/sync/syncEngine';
 
+/** Deprecated legacy stub retained only for backwards compatibility with symbol imports */
 export const INITIAL_ADMIN_PROFILE: Profile = {
   user_id: '00000000-0000-0000-0000-000000000001',
-  full_name: 'Becky (Store Owner)',
+  full_name: 'Store Owner',
   phone: '+254 712 345 678',
+  email: 'kamenengewa@gmail.com',
   role: 'admin',
   active: true,
   created_at: '2026-10-22T00:00:00.000Z',
@@ -37,7 +39,7 @@ export interface AuthContextType {
   addEmployee: (emp: { full_name: string; phone?: string; role: AppRole; email?: string; password?: string }) => Promise<Profile>;
   updateEmployee: (userId: string, updates: Partial<Profile>) => Promise<void>;
   toggleEmployeeActive: (userId: string) => Promise<void>;
-  hasRole: (allowed: AppRole[]) => boolean;
+  hasRole: (allowed: AppRole | AppRole[]) => boolean;
   canAccessModule: (moduleName: string) => boolean;
   canManageStaff: boolean;
   canManageInventory: boolean;
@@ -51,16 +53,16 @@ export interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [staffProfiles, setStaffProfiles] = useState<Profile[]>([INITIAL_ADMIN_PROFILE]);
-  const [profile, setProfile] = useState<Profile | null>(INITIAL_ADMIN_PROFILE);
+  const [staffProfiles, setStaffProfiles] = useState<Profile[]>([]);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [session, setSession] = useState<any | null>(null);
   const [currentRole, setCurrentRole] = useState<AppRole>('admin');
   const [isLoading, setIsLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const isSupabase = isSupabaseConfigured();
 
-  // Helper to load profile from Supabase with offline cache fallback
-  const loadSupabaseProfile = async (userId: string, userMeta?: any) => {
+  // Helper to load verified profile from Supabase
+  const loadSupabaseProfile = useCallback(async (userId: string, authUser?: any): Promise<Profile | null> => {
     try {
       const { data: prof, error } = await supabase
         .from('profiles')
@@ -69,269 +71,174 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .maybeSingle();
 
       if (prof && !error) {
-        setProfile(prof as Profile);
-        setCurrentRole((prof.role || 'admin') as AppRole);
-        setStaffProfiles([prof as Profile]);
+        const activeProf = prof as Profile;
+        setProfile(activeProf);
+        setCurrentRole((activeProf.role || 'admin') as AppRole);
+        setStaffProfiles([activeProf]);
         setIsAuthenticated(true);
         try {
-          localStorage.setItem(CACHED_PROFILE_KEY, JSON.stringify(prof));
+          localStorage.setItem(CACHED_PROFILE_KEY, JSON.stringify(activeProf));
         } catch {}
-      } else {
-        // Fallback to cached profile if available
-        const cached = typeof window !== 'undefined' ? localStorage.getItem(CACHED_PROFILE_KEY) : null;
-        if (cached) {
-          try {
-            const parsed = JSON.parse(cached);
+        return activeProf;
+      }
+
+      // If user exists in Supabase Auth but profile row not yet inserted, auto-provision
+      const meta = authUser?.user_metadata || {};
+      const newRow: Profile = {
+        user_id: userId,
+        full_name: meta.full_name || authUser?.email?.split('@')[0] || 'Becky (Store Owner)',
+        phone: meta.phone || '+254 712 345 678',
+        email: authUser?.email || null,
+        role: (meta.role as AppRole) || 'admin',
+        active: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      const { data: inserted, error: insertErr } = await supabase
+        .from('profiles')
+        .upsert(newRow)
+        .select()
+        .maybeSingle();
+
+      const savedProf = (inserted || newRow) as Profile;
+      setProfile(savedProf);
+      setCurrentRole((savedProf.role || 'admin') as AppRole);
+      setStaffProfiles([savedProf]);
+      setIsAuthenticated(true);
+      try {
+        localStorage.setItem(CACHED_PROFILE_KEY, JSON.stringify(savedProf));
+      } catch {}
+      return savedProf;
+    } catch (err) {
+      console.warn('Network issue loading Supabase profile:', err);
+      // If user has verified Supabase session and cached profile matches current user
+      const cached = typeof window !== 'undefined' ? localStorage.getItem(CACHED_PROFILE_KEY) : null;
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (parsed && parsed.user_id === userId) {
             setProfile(parsed);
             setCurrentRole((parsed.role || 'admin') as AppRole);
             setStaffProfiles([parsed]);
             setIsAuthenticated(true);
-            return;
-          } catch {}
-        }
-
-        // Single user mode: Store Owner Admin
-        const assignedRole: AppRole = 'admin';
-        const assignedName: string = userMeta?.full_name || 'Becky (Store Owner)';
-        const assignedPhone: string = userMeta?.phone || '+254 712 345 678';
-
-        const newRow: Profile = {
-          user_id: userId,
-          full_name: assignedName,
-          phone: assignedPhone,
-          role: assignedRole,
-          active: true,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-
-        const { data: inserted, error: insertErr } = await supabase
-          .from('profiles')
-          .insert(newRow)
-          .select()
-          .single();
-
-        if (inserted && !insertErr) {
-          setProfile(inserted as Profile);
-          setCurrentRole('admin');
-          setStaffProfiles([inserted as Profile]);
-          setIsAuthenticated(true);
-          try {
-            localStorage.setItem(CACHED_PROFILE_KEY, JSON.stringify(inserted));
-          } catch {}
-        } else {
-          // Keep user logged in offline
-          setProfile(newRow);
-          setCurrentRole('admin');
-          setStaffProfiles([newRow]);
-          setIsAuthenticated(true);
-          try {
-            localStorage.setItem(CACHED_PROFILE_KEY, JSON.stringify(newRow));
-          } catch {}
-        }
+            return parsed;
+          }
+        } catch {}
       }
-    } catch (err) {
-      console.warn('Network offline or error loading Supabase profile:', err);
-      // Offline fallback: load cached profile
-      try {
-        const cached = typeof window !== 'undefined' ? localStorage.getItem(CACHED_PROFILE_KEY) : null;
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          setProfile(parsed);
-          setCurrentRole((parsed.role || 'admin') as AppRole);
-          setStaffProfiles([parsed]);
-          setIsAuthenticated(true);
-        } else {
-          setProfile(INITIAL_ADMIN_PROFILE);
-          setCurrentRole('admin');
-          setStaffProfiles([INITIAL_ADMIN_PROFILE]);
-          setIsAuthenticated(true);
-        }
-      } catch {}
-    } finally {
-      setIsLoading(false);
+      return null;
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    if (isSupabase) {
-      // 1. Check existing Supabase session
-      supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
-        setSession(currentSession);
-        if (currentSession?.user) {
-          loadSupabaseProfile(currentSession.user.id, currentSession.user.user_metadata);
-        } else {
-          // If offline and we have a cached profile, keep user logged in
-          const cached = localStorage.getItem(CACHED_PROFILE_KEY);
-          if (cached && !navigator.onLine) {
-            try {
-              const parsed = JSON.parse(cached);
-              setProfile(parsed);
-              setCurrentRole((parsed.role || 'admin') as AppRole);
-              setStaffProfiles([parsed]);
-              setIsAuthenticated(true);
-              setIsLoading(false);
-              return;
-            } catch {}
-          }
-          setIsLoading(false);
-          setIsAuthenticated(false);
-          setProfile(null);
-        }
-      }).catch((err) => {
-        console.warn('Offline getSession fallback:', err);
-        const cached = localStorage.getItem(CACHED_PROFILE_KEY);
-        if (cached) {
-          try {
-            const parsed = JSON.parse(cached);
-            setProfile(parsed);
-            setCurrentRole((parsed.role || 'admin') as AppRole);
-            setStaffProfiles([parsed]);
-            setIsAuthenticated(true);
-          } catch {}
-        }
+    if (!isSupabase) {
+      console.error('[Security] Supabase is not configured. Local accounts are strictly disabled.');
+      setIsLoading(false);
+      setIsAuthenticated(false);
+      setProfile(null);
+      setSession(null);
+      return;
+    }
+
+    // 1. Verify active Supabase session
+    supabase.auth.getSession().then(async ({ data: { session: currentSession }, error }) => {
+      if (error || !currentSession?.user) {
+        try {
+          localStorage.removeItem(CACHED_PROFILE_KEY);
+          localStorage.removeItem(STAFF_STORAGE_KEY);
+        } catch {}
+        setSession(null);
+        setProfile(null);
+        setIsAuthenticated(false);
         setIsLoading(false);
-      });
+        return;
+      }
 
-      // 2. Subscribe to auth changes (Sign In, Sign Out, Token Refresh)
-      const {
-        data: { subscription },
-      } = supabase.auth.onAuthStateChange(async (event, newSession) => {
-        setSession(newSession);
-        if (newSession?.user) {
-          await loadSupabaseProfile(newSession.user.id, newSession.user.user_metadata);
-        } else if (event === 'SIGNED_OUT') {
-          try {
-            localStorage.removeItem(CACHED_PROFILE_KEY);
-          } catch {}
-          setProfile(null);
-          setIsAuthenticated(false);
-          setIsLoading(false);
-        }
-      });
+      setSession(currentSession);
+      await loadSupabaseProfile(currentSession.user.id, currentSession.user);
+      setIsLoading(false);
+    }).catch((err) => {
+      console.warn('Failed to verify Supabase session:', err);
+      setSession(null);
+      setProfile(null);
+      setIsAuthenticated(false);
+      setIsLoading(false);
+    });
 
-      return () => {
-        subscription.unsubscribe();
-      };
-    } else {
-      // Single User Mode (Store Owner): load from localStorage or default
-      try {
-        const stored = localStorage.getItem(STAFF_STORAGE_KEY);
-        let ownerProfile: Profile = INITIAL_ADMIN_PROFILE;
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            ownerProfile = { ...parsed[0], role: 'admin', active: true };
-          }
-        }
-        localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify([ownerProfile]));
-        setStaffProfiles([ownerProfile]);
-        setProfile(ownerProfile);
-        setCurrentRole('admin');
+    // 2. Subscribe to Supabase auth events (Sign in, Sign out, Token Refresh)
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+      setSession(newSession);
+      if (newSession?.user) {
+        await loadSupabaseProfile(newSession.user.id, newSession.user);
         setIsAuthenticated(true);
-      } catch (e) {
-        console.warn('Error reading owner storage:', e);
-        setStaffProfiles([INITIAL_ADMIN_PROFILE]);
-        setProfile(INITIAL_ADMIN_PROFILE);
-        setCurrentRole('admin');
-        setIsAuthenticated(true);
-      } finally {
+        setIsLoading(false);
+      } else {
+        try {
+          localStorage.removeItem(CACHED_PROFILE_KEY);
+          localStorage.removeItem(STAFF_STORAGE_KEY);
+          localStorage.removeItem(ACTIVE_USER_ID_KEY);
+        } catch {}
+        setProfile(null);
+        setIsAuthenticated(false);
         setIsLoading(false);
       }
-    }
-  }, [isSupabase]);
+    });
 
-  const saveProfilesLocally = (newList: Profile[]) => {
-    setStaffProfiles(newList);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(STAFF_STORAGE_KEY, JSON.stringify(newList));
-    }
-  };
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [isSupabase, loadSupabaseProfile]);
 
-  // Sign In with email and password
+  // Sign In strictly with Supabase email and password
   const signInWithPassword = async (
     email: string,
     password: string
   ): Promise<{ success: boolean; error?: string }> => {
     setIsLoading(true);
-    if (isSupabase) {
-      try {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
-          password,
-        });
 
-        if (error) {
-          // If the account does not exist in Supabase yet, automatically provision initial store owner
-          if (error.message.toLowerCase().includes('invalid login credentials')) {
-            const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-              email: email.trim(),
-              password,
-              options: {
-                data: {
-                  full_name: 'Becky (Store Owner)',
-                  phone: '+254 712 345 678',
-                  role: 'admin',
-                },
-              },
-            });
-            if (signUpData?.user && !signUpError) {
-              await loadSupabaseProfile(signUpData.user.id, {
-                full_name: 'Becky (Store Owner)',
-                phone: '+254 712 345 678',
-                role: 'admin',
-              });
-              return { success: true };
-            }
-          }
+    if (!isSupabase) {
+      setIsLoading(false);
+      return {
+        success: false,
+        error: 'Supabase cloud is not configured. Local logins are disabled.',
+      };
+    }
 
-          // Fallback to local store owner if offline or network error
-          if (typeof navigator !== 'undefined' && (!navigator.onLine || error.message.toLowerCase().includes('fetch'))) {
-            const fallback = staffProfiles[0] || INITIAL_ADMIN_PROFILE;
-            setProfile(fallback);
-            setCurrentRole('admin');
-            setIsAuthenticated(true);
-            setIsLoading(false);
-            return { success: true };
-          }
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
-          setIsLoading(false);
-          return { success: false, error: error.message };
-        }
-
-        if (data.user) {
-          await loadSupabaseProfile(data.user.id, data.user.user_metadata);
-        }
-        return { success: true };
-      } catch (err: any) {
-        // Fallback to local store owner on connection error
-        const fallback = staffProfiles[0] || INITIAL_ADMIN_PROFILE;
-        setProfile(fallback);
-        setCurrentRole('admin');
-        setIsAuthenticated(true);
+      if (error) {
         setIsLoading(false);
-        return { success: true };
+        return { success: false, error: error.message };
       }
-    } else {
-      // Local store mode sign in
-      const matched =
-        staffProfiles.find(
-          (p) =>
-            p.full_name.toLowerCase().includes(email.toLowerCase()) ||
-            (p.phone && p.phone.includes(email))
-        ) || staffProfiles[0] || INITIAL_ADMIN_PROFILE;
 
-      setProfile(matched);
-      setCurrentRole(matched.role);
+      if (!data.user) {
+        setIsLoading(false);
+        return { success: false, error: 'User account not found in Supabase.' };
+      }
+
+      setSession(data.session);
+      await loadSupabaseProfile(data.user.id, data.user);
       setIsAuthenticated(true);
       setIsLoading(false);
       return { success: true };
+    } catch (err: any) {
+      setIsLoading(false);
+      return {
+        success: false,
+        error: err.message || 'Authentication error. Please check your credentials and internet connection.',
+      };
     }
   };
 
-  // Sign Up / Register Store Owner or Staff
+  // Sign Up / Register Store Owner or Staff in Supabase
   const signUp = async (
     email: string,
     password: string,
@@ -340,55 +247,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     role: AppRole = 'admin'
   ): Promise<{ success: boolean; error?: string }> => {
     setIsLoading(true);
-    if (isSupabase) {
-      try {
-        const { data, error } = await supabase.auth.signUp({
-          email: email.trim(),
-          password,
-          options: {
-            data: {
-              full_name: fullName.trim(),
-              phone: phone.trim(),
-              role,
-            },
-          },
-        });
 
-        if (error) {
-          setIsLoading(false);
-          return { success: false, error: error.message };
-        }
+    if (!isSupabase) {
+      setIsLoading(false);
+      return { success: false, error: 'Supabase cloud authentication is required.' };
+    }
 
-        if (data.user) {
-          await loadSupabaseProfile(data.user.id, {
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          data: {
             full_name: fullName.trim(),
             phone: phone.trim(),
             role,
-          });
-        }
-        return { success: true };
-      } catch (err: any) {
+          },
+        },
+      });
+
+      if (error) {
         setIsLoading(false);
-        return { success: false, error: err.message || 'Sign up failed' };
+        return { success: false, error: error.message };
       }
-    } else {
-      // Offline mode registration
-      const newProf: Profile = {
-        user_id: `00000000-0000-0000-0000-${Date.now().toString().slice(-12)}`,
-        full_name: fullName.trim(),
-        phone: phone.trim(),
-        role,
-        active: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      const updatedList = [...staffProfiles, newProf];
-      saveProfilesLocally(updatedList);
-      setProfile(newProf);
-      setCurrentRole(role);
-      setIsAuthenticated(true);
+
+      if (data.user) {
+        setSession(data.session);
+        await loadSupabaseProfile(data.user.id, {
+          email: email.trim(),
+          user_metadata: {
+            full_name: fullName.trim(),
+            phone: phone.trim(),
+            role,
+          },
+        });
+      }
       setIsLoading(false);
       return { success: true };
+    } catch (err: any) {
+      setIsLoading(false);
+      return { success: false, error: err.message || 'Sign up failed' };
     }
   };
 
@@ -399,16 +297,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (isSupabase) {
         await supabase.auth.signOut();
       }
-      setProfile(null);
-      setSession(null);
-      setIsAuthenticated(false);
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem(ACTIVE_USER_ID_KEY);
-      }
     } catch (err) {
       console.warn('Sign out error:', err);
     } finally {
+      try {
+        localStorage.removeItem(CACHED_PROFILE_KEY);
+        localStorage.removeItem(STAFF_STORAGE_KEY);
+        localStorage.removeItem(ACTIVE_USER_ID_KEY);
+      } catch {}
+      setProfile(null);
+      setSession(null);
+      setIsAuthenticated(false);
       setIsLoading(false);
+      if (typeof window !== 'undefined') {
+        window.location.href = '/login';
+      }
     }
   };
 
@@ -436,48 +339,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     email?: string;
     password?: string;
   }): Promise<Profile> => {
-    const newId = `00000000-0000-0000-0000-${Date.now().toString().slice(-12)}`;
+    if (!isSupabase) {
+      throw new Error('Supabase is required to register new staff accounts.');
+    }
+
+    let authUserId: string | null = null;
+    if (emp.email && emp.password) {
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email: emp.email.trim(),
+        password: emp.password,
+        options: {
+          data: {
+            full_name: emp.full_name.trim(),
+            phone: emp.phone?.trim() || '+254 ',
+            role: emp.role,
+          },
+        },
+      });
+      if (signUpError) {
+        throw new Error(signUpError.message);
+      }
+      authUserId = signUpData.user?.id || null;
+    }
+
     const newProfile: Profile = {
-      user_id: newId,
+      user_id: authUserId || `00000000-0000-0000-0000-${Date.now().toString().slice(-12)}`,
       full_name: emp.full_name.trim(),
       phone: emp.phone?.trim() || '+254 ',
+      email: emp.email?.trim() || null,
       role: emp.role,
       active: true,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
 
-    if (isSupabase && emp.email && emp.password) {
-      try {
-        // Sign up employee in Supabase
-        await supabase.auth.signUp({
-          email: emp.email.trim(),
-          password: emp.password,
-          options: {
-            data: {
-              full_name: newProfile.full_name,
-              phone: newProfile.phone,
-              role: newProfile.role,
-            },
-          },
-        });
-      } catch (err) {
-        console.warn('Could not register Supabase user credentials:', err);
-      }
+    const { error: upsertErr } = await supabase.from('profiles').upsert(newProfile);
+    if (upsertErr) {
+      console.warn('Supabase profile upsert error:', upsertErr);
     }
 
-    if (isSupabase) {
-      try {
-        await supabase.from('profiles').upsert(newProfile);
-      } catch (err) {
-        console.warn('Supabase profile upsert error:', err);
-      }
-    }
-
-    const updatedList = [...staffProfiles, newProfile];
-    saveProfilesLocally(updatedList);
-
-    // Queue sync to cloud
+    setStaffProfiles((prev) => [...prev, newProfile]);
     syncEngine.queueOperation('profile_upsert', newProfile).catch(console.error);
 
     return newProfile;
@@ -502,7 +403,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return p;
     });
 
-    saveProfilesLocally(updatedList);
+    setStaffProfiles(updatedList);
 
     if (isSupabase) {
       try {
@@ -522,26 +423,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const toggleEmployeeActive = async (userId: string) => {
-    if (userId === INITIAL_ADMIN_PROFILE.user_id || (staffProfiles[0] && staffProfiles[0].user_id === userId && staffProfiles[0].role === 'admin')) {
-      alert('The Store Owner account cannot be deactivated.');
-      return;
-    }
-
     const target = staffProfiles.find((p) => p.user_id === userId);
     if (!target) return;
-
+    if (target.role === 'admin' && profile?.user_id === userId) {
+      alert('The primary Store Owner account cannot be deactivated.');
+      return;
+    }
     await updateEmployee(userId, { active: !target.active });
   };
 
-  const hasRole = (allowed: AppRole[]): boolean => {
-    // In Single User Mode, the Store Owner holds master authority across all roles
-    return true;
+  const hasRole = (allowed: AppRole | AppRole[]): boolean => {
+    if (!profile) return false;
+    const allowedArr = Array.isArray(allowed) ? allowed : [allowed];
+    if (profile.role === 'admin' || profile.role === 'owner') return true;
+    return allowedArr.includes(profile.role);
   };
 
   const canAccessModule = (moduleName: string): boolean => {
-    // Store Owner has access to all operational store modules
+    if (!profile) return false;
+    if (profile.role === 'admin' || profile.role === 'owner') return true;
+    if (profile.role === 'cashier') {
+      return ['pos', 'catalogue', 'receipts', 'customers'].includes(moduleName);
+    }
+    if (profile.role === 'inventory_clerk') {
+      return ['inventory', 'catalogue', 'purchases'].includes(moduleName);
+    }
+    if (profile.role === 'accountant') {
+      return ['reports', 'invoices', 'expenses', 'payments', 'customers'].includes(moduleName);
+    }
     return true;
   };
+
+  const isOwnerOrAdmin = profile?.role === 'admin' || profile?.role === 'owner';
+  const isManager = profile?.role === 'store_manager';
 
   const value: AuthContextType = {
     user: profile,
@@ -561,13 +475,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     toggleEmployeeActive,
     hasRole,
     canAccessModule,
-    canManageStaff: true,
-    canManageInventory: true,
-    canMakeSales: true,
-    canViewFinancials: true,
-    canVerifyPayments: true,
-    canAlterPrices: true,
-    canDeleteRecords: true,
+    canManageStaff: isOwnerOrAdmin,
+    canManageInventory: isOwnerOrAdmin || isManager || profile?.role === 'inventory_clerk',
+    canMakeSales: Boolean(profile),
+    canViewFinancials: isOwnerOrAdmin || isManager || profile?.role === 'accountant',
+    canVerifyPayments: isOwnerOrAdmin || isManager || profile?.role === 'accountant',
+    canAlterPrices: isOwnerOrAdmin || isManager,
+    canDeleteRecords: isOwnerOrAdmin,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

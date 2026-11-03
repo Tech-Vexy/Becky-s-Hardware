@@ -70,11 +70,27 @@ This document is the **universal, permanent system memory and operational instru
 
 ---
 
-## 5. Memory Protocol (When to Remember & What to Store)
+## 5. Authentication, Access Control & Deployment Protection
+
+- **Supabase-Only Authentication**:
+  - Login is **strictly authenticated through Supabase Cloud Auth** (`supabase.auth.signInWithPassword`).
+  - Strictly **NO local accounts, NO offline mock logins, NO automatic sign-up fallbacks, and NO hardcoded store owner credentials**.
+  - Unauthenticated initial state: `user = null`, `isAuthenticated = false`.
+- **Edge Route Protection (`middleware.ts`)**:
+  - Next.js server middleware enforces active Supabase authentication using `supabase.auth.getUser()`.
+  - Unauthenticated users attempting to access `/`, `/pos`, `/inventory`, or any store module are redirected immediately to `/login`.
+  - Authenticated sessions visiting `/login` are automatically redirected to `/`.
+- **Vercel Deployment Protection & Security Headers**:
+  - Headers enforced: CSP, HSTS, X-Frame-Options (DENY), X-Content-Type-Options (nosniff), Referrer-Policy, and Permissions-Policy.
+  - Vercel Deployment Protection, WAF, and environment variable shielding for production.
+
+---
+
+## 6. Memory Protocol (When to Remember & What to Store)
 
 ### What to Remember Permanently
-1. **Architectural Decisions**: Decisions that affect the entire app (e.g. offline-first Dexie + Supabase, bottom navigation, single store, model provider: Nvidia).
-2. **User Corrections & Business Policies**: Any explicit preference given by the user (e.g. KES currency, 16% VAT, no Simba Hardware, updateable prices, daily sales tracking).
+1. **Architectural Decisions**: Decisions that affect the entire app (e.g. offline-first Dexie + Supabase, bottom navigation, single store, model provider: Nvidia, Supabase-only auth).
+2. **User Corrections & Business Policies**: Any explicit preference given by the user (e.g. KES currency, 16% VAT, no Simba Hardware, updateable prices, daily sales tracking, no local accounts).
 3. **Database & Schema Invariants**: Table structures, RPC names, RLS rules, and sync operation types.
 4. **Codebase Patterns**: Component conventions, formatting helpers, and auth role permissions.
 

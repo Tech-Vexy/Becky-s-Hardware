@@ -1,5 +1,6 @@
 import { localDb, type OfflineReceiptRecord } from '@/lib/dexie/db';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase/client';
+import { roundMoney, vatFromInclusiveTotal } from '@/lib/utils/money';
 import type {
   SyncQueueItem,
   SyncOperationType,
@@ -8,7 +9,6 @@ import type {
   Payment,
   SaleItem,
   Product,
-  Invoice,
 } from '@/lib/types/database';
 
 export interface SyncEngineStatus {
@@ -26,6 +26,7 @@ class SyncEngine {
   private listeners: Set<StatusListener> = new Set();
   private lastSyncTime: string | null = null;
   private lastError: string | null = null;
+  private pendingCount = 0;
   private isOnline = typeof window !== 'undefined' ? window.navigator.onLine : true;
 
   constructor() {
@@ -44,21 +45,32 @@ class SyncEngine {
   public subscribe(listener: StatusListener): () => void {
     this.listeners.add(listener);
     listener(this.getStatus());
+    void this.refreshPendingCount().then(() => this.emit());
     return () => {
       this.listeners.delete(listener);
     };
   }
 
-  private notify() {
+  private emit() {
     const status = this.getStatus();
     this.listeners.forEach((listener) => listener(status));
+  }
+
+  private async refreshPendingCount(): Promise<void> {
+    this.pendingCount = await this.getPendingCount();
+  }
+
+  private notify() {
+    // Refresh the queue depth before broadcasting so subscribers (navbar,
+    // sync center) never receive a stale count.
+    void this.refreshPendingCount().finally(() => this.emit());
   }
 
   public getStatus(): SyncEngineStatus {
     return {
       isOnline: this.isOnline,
       isSyncing: this.isSyncing,
-      pendingCount: 0, // dynamic caller gets count via getPendingCount
+      pendingCount: this.pendingCount,
       lastSyncTime: this.lastSyncTime,
       lastError: this.lastError,
     };
@@ -117,15 +129,19 @@ class SyncEngine {
     const receiptNumber = `RCP-${dateStr}-${randCode}`;
     const saleId = `00000000-0000-0000-0006-${Date.now().toString().slice(-12)}`;
 
-    // 1. Calculate totals
+    // 1. Calculate totals (all money rounded to 2dp)
     let subtotal = 0;
     let totalDiscount = 0;
     const saleItems: SaleItem[] = [];
 
     for (const item of payload.items) {
-      const lineTotal = item.quantity * item.unit_price_kes - (item.discount_kes || 0);
+      const lineDiscount = item.discount_kes || 0;
+      const lineTotal = Math.max(
+        0,
+        roundMoney(item.quantity * item.unit_price_kes - lineDiscount)
+      );
       subtotal += item.quantity * item.unit_price_kes;
-      totalDiscount += item.discount_kes || 0;
+      totalDiscount += lineDiscount;
 
       saleItems.push({
         id: `00000000-0000-0000-0007-${Math.random().toString().slice(2, 14)}`,
@@ -135,22 +151,25 @@ class SyncEngine {
         sku_snapshot: item.sku,
         quantity: item.quantity,
         unit_price_kes: item.unit_price_kes,
-        discount_kes: item.discount_kes || 0,
+        discount_kes: lineDiscount,
         line_total_kes: lineTotal,
       });
     }
 
-    const totalKes = Math.max(0, subtotal - totalDiscount);
-    const taxKes = Math.round(totalKes * (16 / 116) * 100) / 100; // 16% VAT standard in Kenya
+    subtotal = roundMoney(subtotal);
+    totalDiscount = roundMoney(totalDiscount);
+    const totalKes = roundMoney(Math.max(0, subtotal - totalDiscount));
+    const taxKes = vatFromInclusiveTotal(totalKes); // 16% VAT standard in Kenya
     let totalPaid = 0;
 
     const payments: Payment[] = payload.payments.map((p) => {
-      totalPaid += p.amount_kes;
+      const amount = roundMoney(p.amount_kes);
+      totalPaid += amount;
       return {
         id: `00000000-0000-0000-0008-${Math.random().toString().slice(2, 14)}`,
         sale_id: saleId,
         method: p.method,
-        amount_kes: p.amount_kes,
+        amount_kes: amount,
         provider_reference: p.provider_reference || null,
         // Offline M-Pesa is NEVER marked verified without trusted verification
         verification_status:
@@ -164,32 +183,76 @@ class SyncEngine {
     });
 
     // 2. Perform atomic local transaction in Dexie
-    await localDb.transaction('rw', [localDb.products, localDb.sales, localDb.stockMovements, localDb.offlineReceipts, localDb.syncQueue], async () => {
+    await localDb.transaction(
+      'rw',
+      [
+        localDb.storeSettings,
+        localDb.products,
+        localDb.sales,
+        localDb.stockMovements,
+        localDb.offlineReceipts,
+        localDb.syncQueue,
+      ],
+      async () => {
+      const settings = await localDb.storeSettings.get(
+        '00000000-0000-0000-0000-000000000001'
+      );
+      const allowNegativeStock = settings?.allow_negative_stock ?? false;
+
+      // Items queued for the cloud. The server re-prices from the catalogue,
+      // so negotiated POS prices are transmitted as an explicit line discount
+      // rather than a trusted unit price.
+      const queuedItems: Array<{
+        product_id: string;
+        quantity: number;
+        discount_kes: number;
+      }> = [];
+
       // Deduct stock and log movements in local virtual store
       for (const item of payload.items) {
         const prod = await localDb.products.get(item.product_id);
-        if (prod) {
-          const newStock = Math.max(0, prod.stock_on_hand - item.quantity);
-          await localDb.products.update(item.product_id, {
-            stock_on_hand: newStock,
-            updated_at: new Date().toISOString(),
-          });
-
-          const mov: StockMovement = {
-            id: `mov_${Date.now()}_${item.product_id.slice(-6)}`,
-            product_id: item.product_id,
-            product_name: item.product_name,
-            sku: item.sku,
-            movement_type: 'sale',
-            quantity_delta: -item.quantity,
-            unit_cost_kes: prod.buying_price_kes,
-            reason: `Sale checkout ${receiptNumber}`,
-            created_by: payload.cashier_id,
-            created_by_name: payload.cashier_name,
-            created_at: new Date().toISOString(),
-          };
-          await localDb.stockMovements.put(mov);
+        if (!prod) {
+          throw new Error(
+            `Product ${item.sku || item.product_id} is no longer in the local catalogue.`
+          );
         }
+
+        if (!allowNegativeStock && prod.stock_on_hand < item.quantity) {
+          throw new Error(
+            `Insufficient stock for ${prod.product_name}. Available: ${prod.stock_on_hand}, requested: ${item.quantity}.`
+          );
+        }
+
+        const newStock = roundMoney(prod.stock_on_hand - item.quantity);
+        await localDb.products.update(item.product_id, {
+          stock_on_hand: newStock,
+          updated_at: new Date().toISOString(),
+        });
+
+        const masterPrice = Number(prod.selling_price_kes) || 0;
+        const negotiatedDiscount = roundMoney(
+          Math.max(0, masterPrice - item.unit_price_kes) * item.quantity
+        );
+        queuedItems.push({
+          product_id: item.product_id,
+          quantity: item.quantity,
+          discount_kes: roundMoney(negotiatedDiscount + (item.discount_kes || 0)),
+        });
+
+        const mov: StockMovement = {
+          id: `mov_${Date.now()}_${item.product_id.slice(-6)}`,
+          product_id: item.product_id,
+          product_name: item.product_name,
+          sku: item.sku,
+          movement_type: 'sale',
+          quantity_delta: -item.quantity,
+          unit_cost_kes: prod.buying_price_kes,
+          reason: `Sale checkout ${receiptNumber}`,
+          created_by: payload.cashier_id,
+          created_by_name: payload.cashier_name,
+          created_at: new Date().toISOString(),
+        };
+        await localDb.stockMovements.put(mov);
       }
 
       // Save sale locally
@@ -205,7 +268,7 @@ class SyncEngine {
         discount_kes: totalDiscount,
         tax_kes: taxKes,
         total_kes: totalKes,
-        amount_paid_kes: totalPaid,
+        amount_paid_kes: roundMoney(totalPaid),
         offline_id: clientId,
         idempotency_key: idempotencyKey,
         is_offline_sync: !this.isOnline,
@@ -223,13 +286,14 @@ class SyncEngine {
         sale_id: saleId,
         customer_name: payload.customer_name || 'Walk-In Customer',
         total_kes: totalKes,
-        amount_paid_kes: totalPaid,
+        amount_paid_kes: roundMoney(totalPaid),
         payment_method: payload.payments.map((p) => p.method).join(', '),
         provider_reference: payload.payments.find((p) => p.provider_reference)?.provider_reference,
         items_count: payload.items.length,
         cashier_name: payload.cashier_name,
         created_at: new Date().toISOString(),
-        sync_status: this.isOnline ? 'synced' : 'queued',
+        // Flipped to 'synced' only after the server acknowledges the sale.
+        sync_status: 'queued',
       };
       await localDb.offlineReceipts.put(receiptRecord);
 
@@ -243,17 +307,15 @@ class SyncEngine {
           idempotency_key: idempotencyKey,
           receipt_number: receiptNumber,
           customer_id: payload.customer_id,
-          discount_kes: totalDiscount,
-          is_offline_sync: true,
+          // Item-level discounts below already cover negotiated prices and
+          // explicit line discounts; a header discount would double-count.
+          discount_kes: 0,
+          is_offline_sync: !this.isOnline,
           notes: payload.notes,
-          items: payload.items.map((i) => ({
-            product_id: i.product_id,
-            quantity: i.quantity,
-            discount_kes: i.discount_kes,
-          })),
+          items: queuedItems,
           payments: payload.payments.map((p) => ({
             method: p.method,
-            amount_kes: p.amount_kes,
+            amount_kes: roundMoney(p.amount_kes),
             provider_reference: p.provider_reference,
             verification_status: p.method === 'mpesa' ? 'unverified' : 'verified',
             notes: p.notes,
@@ -279,7 +341,7 @@ class SyncEngine {
       success: true,
       receipt_number: receiptNumber,
       sale_id: saleId,
-      offline_queued: true,
+      offline_queued: !this.isOnline,
     };
   }
 

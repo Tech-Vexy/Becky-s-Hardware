@@ -40,3 +40,17 @@ This document serves as the permanent reference guide for agents and developers 
 - **Local DB**: Dexie IndexedDB (`HardwareStoreLocalDB`).
 - **Remote DB**: Supabase PostgreSQL (`gikivrpwayzqrvrturyz`).
 - **Sync**: `syncEngine.syncAll()` pushes queued mutations and pulls cloud updates.
+
+---
+
+## 5. Authentication, Access Control & Deployment Protection
+- **Supabase-Only Authentication**:
+  - All logins are strictly authenticated via Supabase Cloud Auth (`supabase.auth.signInWithPassword`).
+  - Strictly **NO local accounts**, no mock offline logins, no automatic registration fallbacks, and no hardcoded admin logins.
+  - Initial authentication state is unauthenticated (`user = null`, `isAuthenticated = false`).
+- **Edge Route Protection (`middleware.ts`)**:
+  - Next.js server middleware verifies active Supabase sessions using `supabase.auth.getUser()`.
+  - Unauthenticated requests to store routes are immediately redirected with a 307 to `/login`.
+  - Authenticated sessions visiting `/login` are redirected to `/`.
+- **Deployment Security Headers**:
+  - Standard security headers (CSP, HSTS, X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy) are enforced via `next.config.mjs` and `vercel.json`.

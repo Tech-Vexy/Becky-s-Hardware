@@ -17,7 +17,7 @@ export type StockMovementType =
   | 'transfer_out'
   | 'stocktake';
 
-export type PurchaseStatus = 'draft' | 'received' | 'cancelled';
+export type PurchaseStatus = 'pending' | 'ordered' | 'draft' | 'received' | 'cancelled';
 
 export type ReturnCondition = 'good' | 'damaged' | 'scrap';
 
@@ -47,10 +47,22 @@ export interface Profile {
   user_id: string;
   full_name: string;
   phone?: string | null;
+  email?: string | null;
   role: AppRole;
   active: boolean;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface ProductTag {
+  /** Unique tag identifier (slug-style, e.g. "promotion", "new-arrival") */
+  id: string;
+  /** Human-readable label shown in UI */
+  label: string;
+  /** Tailwind bg + text colour pair, e.g. "bg-blue-100 text-blue-800" */
+  color: string;
+  /** Creation timestamp */
+  created_at?: string;
 }
 
 export interface ProductCategory {
@@ -88,6 +100,8 @@ export interface Product {
   active: boolean;
   stock_location?: string | null; // Single shop location
   notes?: string | null;
+  /** Tag IDs attached to this product — stored as JSON array in Dexie */
+  tags?: string[] | null;
   created_by?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -161,11 +175,17 @@ export interface Purchase {
   supplier_name?: string | null;
   status: PurchaseStatus;
   supplier_invoice_no?: string | null;
+  /** Alias for created_at used in PO forms */
+  order_date?: string | null;
+  /** Expected delivery date */
+  expected_delivery?: string | null;
   subtotal_kes: number;
   tax_kes: number;
   total_kes: number;
   notes?: string | null;
   created_by?: string | null;
+  /** Snapshot name of the user who created the PO */
+  created_by_name?: string | null;
   received_by?: string | null;
   received_at?: string | null;
   created_at: string;
@@ -246,7 +266,15 @@ export interface Return {
   refund_method: PaymentMethod;
   total_refund_kes: number;
   reason: string;
+  /** UI-only form field for the return date (maps to created_at on save) */
+  return_date?: string | null;
+  /** Whether returned items are restocked */
+  restock?: boolean | null;
+  notes?: string | null;
+  created_by?: string | null;
+  created_by_name?: string | null;
   created_at: string;
+  updated_at?: string;
   items?: ReturnItem[];
 }
 
@@ -254,17 +282,35 @@ export interface Expense {
   id: string;
   expense_number: string;
   expense_date: string;
-  category: 'casual_labor' | 'transport' | 'utilities' | 'rent' | 'supplies' | 'maintenance' | 'other';
+  category:
+    | 'casual_labor'
+    | 'transport'
+    | 'fuel'
+    | 'kplc'
+    | 'municipal'
+    | 'utilities'
+    | 'rent'
+    | 'supplies'
+    | 'maintenance'
+    | 'general'
+    | 'other';
   amount_kes: number;
   description: string;
-  paid_to: string;
+  /** Primary payee field */
+  paid_to?: string | null;
+  /** Alias used in UI forms */
+  recipient?: string | null;
   payment_method: PaymentMethod;
   provider_reference?: string | null;
+  /** Alias used in UI forms */
+  reference_number?: string | null;
   receipt_ref?: string | null;
+  notes?: string | null;
   created_by: string;
   created_by_name?: string;
   approved_by?: string | null;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface StockMovement {
@@ -303,7 +349,16 @@ export type SyncOperationType =
   | 'return'
   | 'product_upsert'
   | 'profile_upsert'
-  | 'invoice_upsert';
+  | 'invoice_upsert'
+  | 'customer_upsert'
+  | 'supplier_upsert'
+  | 'expense_upsert'
+  | 'expense_delete'
+  | 'purchase_upsert'
+  | 'payment_verification'
+  | 'settings_upsert'
+  | 'tag_upsert'
+  | 'tag_delete';
 
 export type InvoiceStatus = 'draft' | 'pending' | 'paid' | 'partial' | 'cancelled';
 

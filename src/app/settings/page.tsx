@@ -2,17 +2,48 @@
 
 import React, { useState, useEffect } from 'react';
 import { localDb } from '@/lib/dexie/db';
+import { syncEngine } from '@/lib/sync/syncEngine';
 import { useAuth } from '@/lib/auth/AuthContext';
+import { useNotifications } from '@/lib/notifications/NotificationContext';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { Settings, Save, CheckCircle2, ShieldCheck, Smartphone, Printer, Store } from 'lucide-react';
+import {
+  Settings,
+  Store,
+  FileText,
+  Smartphone,
+  Wifi,
+  Shield,
+  Printer,
+  User,
+  CheckCircle2,
+  AlertTriangle,
+  Bell,
+  Mail,
+  Volume2,
+  VolumeX,
+} from 'lucide-react';
 import type { StoreSettings } from '@/lib/types/database';
+import { dispatchEmailAlert } from '@/lib/notifications/emailAlerts';
 
 export default function SettingsPage() {
-  const { role, canManageStaff } = useAuth();
-  const [settings, setSettings] = useState<StoreSettings>({
-    id: '00000000-0000-0000-0000-000000000001',
+  const { user, canManageInventory } = useAuth();
+  const {
+    showToast,
+    addNotification,
+    isRealtimeConnected,
+    browserNotificationPermission,
+    requestWebNotificationPermission,
+    soundEnabled,
+    setSoundEnabled,
+  } = useNotifications();
+  const [settings, setSettings] = useState<StoreSettings | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isSendingTestEmail, setIsSendingTestEmail] = useState(false);
+
+  // Form state
+  const [formData, setFormData] = useState({
     store_name: "Becky's Hardware Store",
     tagline: 'Ubora na Bei Nafuu - Quality Building Materials',
     physical_address: '',
@@ -25,255 +56,544 @@ export default function SettingsPage() {
     mpesa_till: '5432101',
     mpesa_account: 'BECKY',
     receipt_header: "BECKY'S HARDWARE STORE",
-    receipt_footer:
-      'Goods once sold are returnable within 7 days in good condition with original receipt. Asante kwa biashara yako!',
+    receipt_footer: 'Goods once sold are returnable within 7 days with original receipt. Asante kwa biashara yako!',
     allow_offline_credit: false,
     max_offline_sale_kes: 100000.0,
     allow_negative_stock: false,
   });
 
-  const [isSaved, setIsSaved] = useState(false);
+  const loadSettings = async () => {
+    try {
+      const stored = await localDb.storeSettings.get('00000000-0000-0000-0000-000000000001');
+      if (stored) {
+        setSettings(stored);
+        setFormData({
+          store_name: stored.store_name || "Becky's Hardware Store",
+          tagline: stored.tagline || '',
+          physical_address: stored.physical_address || '',
+          phone: stored.phone || '+254 712 345 678',
+          email: stored.email || '',
+          kra_pin: stored.kra_pin || 'P051234567X',
+          currency: stored.currency || 'KES',
+          vat_rate_percent: stored.vat_rate_percent || 16.0,
+          mpesa_paybill: stored.mpesa_paybill || '',
+          mpesa_till: stored.mpesa_till || '',
+          mpesa_account: stored.mpesa_account || '',
+          receipt_header: stored.receipt_header || "BECKY'S HARDWARE STORE",
+          receipt_footer: stored.receipt_footer || '',
+          allow_offline_credit: stored.allow_offline_credit || false,
+          max_offline_sale_kes: stored.max_offline_sale_kes || 100000.0,
+          allow_negative_stock: stored.allow_negative_stock || false,
+        });
+      }
+    } catch (err) {
+      console.error('Failed to load settings:', err);
+    }
+  };
 
   useEffect(() => {
-    const loadSettings = async () => {
-      const s = await localDb.storeSettings.get('00000000-0000-0000-0000-000000000001');
-      if (s) setSettings(s);
-    };
     loadSettings();
   }, []);
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!canManageStaff) {
-      alert('Only store managers or administrators can update store configuration.');
+  const handleSaveSettings = async () => {
+    if (!canManageInventory) {
+      showToast('system', 'Permission Denied', 'Only Store Owner can modify settings.', '/settings');
       return;
     }
 
-    await localDb.storeSettings.put({
-      ...settings,
-      updated_at: new Date().toISOString(),
-    });
+    setIsSaving(true);
+    try {
+      const updatedSettings: StoreSettings = {
+        id: '00000000-0000-0000-0000-000000000001',
+        ...formData,
+        updated_at: new Date().toISOString(),
+        created_at: settings?.created_at || new Date().toISOString(),
+      };
 
-    setIsSaved(true);
-    setTimeout(() => setIsSaved(false), 3000);
+      await localDb.storeSettings.put(updatedSettings);
+      setSettings(updatedSettings);
+
+      // Queue sync to Supabase
+      syncEngine.queueOperation('settings_upsert', updatedSettings).catch(console.error);
+
+      showToast('system', 'Settings Saved', 'Store configuration updated successfully.', '/settings');
+    } catch (e: any) {
+      showToast('system', 'Error', e.message || 'Failed to save settings', '/settings');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
+  const handleTestPwaNotification = async () => {
+    let perm = browserNotificationPermission;
+    if (perm !== 'granted') {
+      const granted = await requestWebNotificationPermission();
+      if (!granted) {
+        showToast('system', 'PWA Permission Needed', 'Please allow notifications in the browser prompt.');
+        return;
+      }
+    }
+    addNotification({
+      type: 'inventory',
+      title: 'PWA Test: Low Stock Alert',
+      message: 'Simba Cement 50kg is down to 4 bags. (PWA alert verified!)',
+      link: '/catalogue',
+    });
+    showToast('system', 'PWA Alert Sent', 'Check your device notification banner.');
+  };
+
+  const handleTestEmailAlert = async () => {
+    setIsSendingTestEmail(true);
+    const success = await dispatchEmailAlert({
+      type: 'inventory',
+      title: 'Test Email Alert: Low Stock Warning',
+      message: 'This is a test alert confirming your Supabase Realtime email pipeline is operational.',
+      productName: 'Simba Cement 50kg',
+      sku: 'CEM-SIMBA-50KG',
+      currentStock: '4 bags',
+      reorderLevel: '30 bags',
+      recipientEmail: user?.email || 'kamenengewa@gmail.com',
+      actionUrl: typeof window !== 'undefined' ? window.location.origin + '/catalogue' : 'https://beckyshardware.co.ke',
+    });
+    setIsSendingTestEmail(false);
+    if (success) {
+      showToast('system', 'Email Alert Dispatched', `Alert sent to ${user?.email || 'kamenengewa@gmail.com'}`);
+    } else {
+      showToast('system', 'Email Logged', 'Alert logged to server trace. Configure RESEND_API_KEY in Vercel to deliver directly to your inbox.');
+    }
+  };
+
+  if (!settings) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-slate-400 text-sm">Loading settings...</div>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="space-y-6">
+      {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-black text-slate-900 tracking-tight">Store Configuration</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-black text-slate-900 tracking-tight">Store Settings</h1>
+            <Badge variant="default">Configuration</Badge>
+          </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Single store hardware retailer parameters: tax compliance PIN, M-Pesa details, receipt disclaimers, and offline rules.
+            Store branding, tax information, payment methods, and operational policies.
           </p>
         </div>
 
-        {isSaved && (
-          <Badge variant="success" className="flex items-center gap-1.5 py-1 px-3">
-            <CheckCircle2 className="h-4 w-4" />
-            <span>Settings Saved Successfully</span>
-          </Badge>
-        )}
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={handleSaveSettings}
+          isLoading={isSaving}
+          disabled={!canManageInventory}
+          className="flex items-center gap-1.5 font-bold"
+        >
+          <CheckCircle2 className="h-4 w-4" />
+          <span>Save Changes</span>
+        </Button>
       </div>
 
-      <form onSubmit={handleSave} className="space-y-6">
-        {/* Business Details */}
-        <Card className="space-y-4">
-          <div className="flex items-center gap-2 pb-3 border-b border-slate-100">
-            <Store className="h-5 w-5 text-amber-600" />
-            <h3 className="text-sm font-bold text-slate-900">Physical Store Information</h3>
+      {!canManageInventory && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+          <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5" />
+          <div className="text-xs text-amber-800">
+            <span className="font-bold">Read-Only Mode:</span> You are viewing store settings. Only the Store Owner can modify configuration.
+          </div>
+        </div>
+      )}
+
+      {/* Store Identity */}
+      <Card>
+        <div className="flex items-center gap-2 mb-4">
+          <div className="h-8 w-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+            <Store className="h-4 w-4" />
+          </div>
+          <h3 className="text-sm font-bold text-slate-900">Store Identity & Branding</h3>
+        </div>
+
+        <div className="space-y-4 text-xs">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="font-bold text-slate-700">Store Name</label>
+              <input
+                type="text"
+                value={formData.store_name}
+                onChange={(e) => setFormData({ ...formData, store_name: e.target.value })}
+                disabled={!canManageInventory}
+                className="w-full mt-1 p-2 rounded-xl border border-slate-300 font-bold focus:outline-none disabled:bg-slate-50"
+              />
+            </div>
+            <div>
+              <label className="font-bold text-slate-700">Tagline</label>
+              <input
+                type="text"
+                value={formData.tagline}
+                onChange={(e) => setFormData({ ...formData, tagline: e.target.value })}
+                disabled={!canManageInventory}
+                className="w-full mt-1 p-2 rounded-xl border border-slate-300 focus:outline-none disabled:bg-slate-50"
+              />
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+          <div>
+            <label className="font-bold text-slate-700">Physical Address</label>
+            <input
+              type="text"
+              value={formData.physical_address}
+              onChange={(e) => setFormData({ ...formData, physical_address: e.target.value })}
+              disabled={!canManageInventory}
+              placeholder="e.g. Shop 12, Main Street, Nairobi"
+              className="w-full mt-1 p-2 rounded-xl border border-slate-300 focus:outline-none disabled:bg-slate-50"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="font-bold text-slate-700">Hardware Store Name</label>
+              <label className="font-bold text-slate-700">Phone Number</label>
               <input
                 type="text"
-                value={settings.store_name}
-                onChange={(e) => setSettings({ ...settings, store_name: e.target.value })}
-                className="w-full mt-1 p-2.5 rounded-xl border border-slate-300 font-bold focus:outline-none"
+                value={formData.phone}
+                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                disabled={!canManageInventory}
+                className="w-full mt-1 p-2 rounded-xl border border-slate-300 font-mono focus:outline-none disabled:bg-slate-50"
               />
             </div>
-
             <div>
-              <label className="font-bold text-slate-700">Tagline / Motto</label>
+              <label className="font-bold text-slate-700">Email Address</label>
               <input
-                type="text"
-                value={settings.tagline}
-                onChange={(e) => setSettings({ ...settings, tagline: e.target.value })}
-                className="w-full mt-1 p-2.5 rounded-xl border border-slate-300 focus:outline-none"
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                disabled={!canManageInventory}
+                className="w-full mt-1 p-2 rounded-xl border border-slate-300 focus:outline-none disabled:bg-slate-50"
               />
             </div>
+          </div>
+        </div>
+      </Card>
 
-            <div>
-              <label className="font-bold text-slate-700">Physical Address / Yard Depot</label>
-              <input
-                type="text"
-                value={settings.physical_address}
-                onChange={(e) => setSettings({ ...settings, physical_address: e.target.value })}
-                className="w-full mt-1 p-2.5 rounded-xl border border-slate-300 focus:outline-none"
-              />
-            </div>
+      {/* Tax & Compliance */}
+      <Card>
+        <div className="flex items-center gap-2 mb-4">
+          <div className="h-8 w-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+            <FileText className="h-4 w-4" />
+          </div>
+          <h3 className="text-sm font-bold text-slate-900">Tax & Compliance</h3>
+        </div>
 
-            <div>
-              <label className="font-bold text-slate-700">Primary Telephone</label>
-              <input
-                type="text"
-                value={settings.phone}
-                onChange={(e) => setSettings({ ...settings, phone: e.target.value })}
-                className="w-full mt-1 p-2.5 rounded-xl border border-slate-300 focus:outline-none"
-              />
-            </div>
-
+        <div className="space-y-4 text-xs">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="font-bold text-slate-700">KRA Tax PIN</label>
               <input
                 type="text"
-                value={settings.kra_pin}
-                onChange={(e) => setSettings({ ...settings, kra_pin: e.target.value.toUpperCase() })}
-                className="w-full mt-1 p-2.5 rounded-xl border border-slate-300 font-mono font-bold uppercase focus:outline-none"
+                value={formData.kra_pin}
+                onChange={(e) => setFormData({ ...formData, kra_pin: e.target.value.toUpperCase() })}
+                disabled={!canManageInventory}
+                placeholder="P051XXXXXXXXX"
+                className="w-full mt-1 p-2 rounded-xl border border-slate-300 font-mono font-bold uppercase focus:outline-none disabled:bg-slate-50"
               />
             </div>
-
-            <div>
-              <label className="font-bold text-slate-700">Sales Email</label>
-              <input
-                type="email"
-                value={settings.email}
-                onChange={(e) => setSettings({ ...settings, email: e.target.value })}
-                className="w-full mt-1 p-2.5 rounded-xl border border-slate-300 focus:outline-none"
-              />
-            </div>
-          </div>
-        </Card>
-
-        {/* Financial & M-Pesa Settings */}
-        <Card className="space-y-4">
-          <div className="flex items-center gap-2 pb-3 border-b border-slate-100">
-            <Smartphone className="h-5 w-5 text-emerald-600" />
-            <h3 className="text-sm font-bold text-slate-900">M-Pesa & Financial Configuration</h3>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-            <div>
-              <label className="font-bold text-slate-700">M-Pesa Buy Goods Till #</label>
-              <input
-                type="text"
-                value={settings.mpesa_till}
-                onChange={(e) => setSettings({ ...settings, mpesa_till: e.target.value })}
-                className="w-full mt-1 p-2.5 rounded-xl border border-slate-300 font-mono font-bold focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="font-bold text-slate-700">M-Pesa Paybill #</label>
-              <input
-                type="text"
-                value={settings.mpesa_paybill}
-                onChange={(e) => setSettings({ ...settings, mpesa_paybill: e.target.value })}
-                className="w-full mt-1 p-2.5 rounded-xl border border-slate-300 font-mono focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="font-bold text-slate-700">Paybill Account Name</label>
-              <input
-                type="text"
-                value={settings.mpesa_account}
-                onChange={(e) => setSettings({ ...settings, mpesa_account: e.target.value })}
-                className="w-full mt-1 p-2.5 rounded-xl border border-slate-300 font-mono focus:outline-none"
-              />
-            </div>
-
             <div>
               <label className="font-bold text-slate-700">Currency</label>
               <input
                 type="text"
-                disabled
-                value={settings.currency}
-                className="w-full mt-1 p-2.5 rounded-xl border border-slate-200 bg-slate-100 font-bold text-slate-600"
-              />
-            </div>
-
-            <div>
-              <label className="font-bold text-slate-700">Standard VAT Rate (%)</label>
-              <input
-                type="number"
-                value={settings.vat_rate_percent}
-                onChange={(e) =>
-                  setSettings({ ...settings, vat_rate_percent: parseFloat(e.target.value) || 0 })
-                }
-                className="w-full mt-1 p-2.5 rounded-xl border border-slate-300 font-bold focus:outline-none"
+                value={formData.currency}
+                onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
+                disabled={!canManageInventory}
+                className="w-full mt-1 p-2 rounded-xl border border-slate-300 font-bold uppercase focus:outline-none disabled:bg-slate-50"
               />
             </div>
           </div>
-        </Card>
 
-        {/* Offline Policies & Receipt Format */}
-        <Card className="space-y-4">
-          <div className="flex items-center gap-2 pb-3 border-b border-slate-100">
-            <Printer className="h-5 w-5 text-amber-600" />
-            <h3 className="text-sm font-bold text-slate-900">Receipt Disclaimers & Offline Policy</h3>
+          <div>
+            <label className="font-bold text-slate-700">VAT Rate (%)</label>
+            <input
+              type="number"
+              step="0.1"
+              value={formData.vat_rate_percent}
+              onChange={(e) => setFormData({ ...formData, vat_rate_percent: parseFloat(e.target.value) || 0 })}
+              disabled={!canManageInventory}
+              className="w-full mt-1 p-2 rounded-xl border border-slate-300 font-bold focus:outline-none disabled:bg-slate-50"
+            />
+            <div className="text-[10px] text-slate-400 mt-1">Standard Kenya VAT is 16%</div>
           </div>
+        </div>
+      </Card>
 
-          <div className="space-y-4 text-xs">
+      {/* M-Pesa Configuration */}
+      <Card>
+        <div className="flex items-center gap-2 mb-4">
+          <div className="h-8 w-8 rounded-lg bg-green-50 text-green-600 flex items-center justify-center">
+            <Smartphone className="h-4 w-4" />
+          </div>
+          <h3 className="text-sm font-bold text-slate-900">M-Pesa Configuration</h3>
+        </div>
+
+        <div className="space-y-4 text-xs">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="font-bold text-slate-700">Receipt Header Display Text</label>
+              <label className="font-bold text-slate-700">Paybill Number</label>
               <input
                 type="text"
-                value={settings.receipt_header}
-                onChange={(e) => setSettings({ ...settings, receipt_header: e.target.value })}
-                className="w-full mt-1 p-2.5 rounded-xl border border-slate-300 font-bold focus:outline-none"
+                value={formData.mpesa_paybill}
+                onChange={(e) => setFormData({ ...formData, mpesa_paybill: e.target.value })}
+                disabled={!canManageInventory}
+                placeholder="247247"
+                className="w-full mt-1 p-2 rounded-xl border border-slate-300 font-mono font-bold focus:outline-none disabled:bg-slate-50"
               />
             </div>
-
             <div>
-              <label className="font-bold text-slate-700">Receipt Return Policy Footer</label>
-              <textarea
-                rows={2}
-                value={settings.receipt_footer}
-                onChange={(e) => setSettings({ ...settings, receipt_footer: e.target.value })}
-                className="w-full mt-1 p-2.5 rounded-xl border border-slate-300 focus:outline-none"
+              <label className="font-bold text-slate-700">Till Number</label>
+              <input
+                type="text"
+                value={formData.mpesa_till}
+                onChange={(e) => setFormData({ ...formData, mpesa_till: e.target.value })}
+                disabled={!canManageInventory}
+                placeholder="5432101"
+                className="w-full mt-1 p-2 rounded-xl border border-slate-300 font-mono font-bold focus:outline-none disabled:bg-slate-50"
               />
             </div>
-
-            <div className="pt-2 border-t border-slate-100 space-y-3">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={settings.allow_offline_credit}
-                  onChange={(e) => setSettings({ ...settings, allow_offline_credit: e.target.checked })}
-                  className="rounded text-amber-600 focus:ring-amber-500"
-                />
-                <span className="font-bold text-slate-800">
-                  Permit Offline Credit Sales (Caution: increases risk of exceeding limits during internet outage)
-                </span>
-              </label>
-
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={settings.allow_negative_stock}
-                  onChange={(e) => setSettings({ ...settings, allow_negative_stock: e.target.checked })}
-                  className="rounded text-amber-600 focus:ring-amber-500"
-                />
-                <span className="font-bold text-slate-800">
-                  Allow Negative Inventory Balance (Sell even if book stock is 0; backorder logged)
-                </span>
-              </label>
+            <div>
+              <label className="font-bold text-slate-700">Account Name</label>
+              <input
+                type="text"
+                value={formData.mpesa_account}
+                onChange={(e) => setFormData({ ...formData, mpesa_account: e.target.value })}
+                disabled={!canManageInventory}
+                placeholder="BECKY"
+                className="w-full mt-1 p-2 rounded-xl border border-slate-300 font-bold uppercase focus:outline-none disabled:bg-slate-50"
+              />
             </div>
           </div>
-        </Card>
+        </div>
+      </Card>
 
-        {canManageStaff && (
-          <div className="flex justify-end">
-            <Button variant="primary" size="lg" type="submit" className="flex items-center gap-2 font-bold">
-              <Save className="h-5 w-5" />
-              <span>Save Configuration</span>
+      {/* Receipt Configuration */}
+      <Card>
+        <div className="flex items-center gap-2 mb-4">
+          <div className="h-8 w-8 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center">
+            <Printer className="h-4 w-4" />
+          </div>
+          <h3 className="text-sm font-bold text-slate-900">Receipt Configuration</h3>
+        </div>
+
+        <div className="space-y-4 text-xs">
+          <div>
+            <label className="font-bold text-slate-700">Receipt Header</label>
+            <input
+              type="text"
+              value={formData.receipt_header}
+              onChange={(e) => setFormData({ ...formData, receipt_header: e.target.value })}
+              disabled={!canManageInventory}
+              className="w-full mt-1 p-2 rounded-xl border border-slate-300 font-bold uppercase focus:outline-none disabled:bg-slate-50"
+            />
+          </div>
+
+          <div>
+            <label className="font-bold text-slate-700">Receipt Footer</label>
+            <textarea
+              value={formData.receipt_footer}
+              onChange={(e) => setFormData({ ...formData, receipt_footer: e.target.value })}
+              disabled={!canManageInventory}
+              rows={2}
+              className="w-full mt-1 p-2 rounded-xl border border-slate-300 focus:outline-none disabled:bg-slate-50 resize-none"
+            />
+          </div>
+        </div>
+      </Card>
+
+      {/* Offline & Operational Policies */}
+      <Card>
+        <div className="flex items-center gap-2 mb-4">
+          <div className="h-8 w-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
+            <Wifi className="h-4 w-4" />
+          </div>
+          <h3 className="text-sm font-bold text-slate-900">Offline & Operational Policies</h3>
+        </div>
+
+        <div className="space-y-4 text-xs">
+          <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
+            <div>
+              <div className="font-bold text-slate-900">Allow Customer Credit Offline</div>
+              <div className="text-[10px] text-slate-500">Permit credit sales when network is unavailable</div>
+            </div>
+            <button
+              onClick={() => setFormData({ ...formData, allow_offline_credit: !formData.allow_offline_credit })}
+              disabled={!canManageInventory}
+              className={`w-12 h-6 rounded-full transition-colors ${
+                formData.allow_offline_credit ? 'bg-amber-600' : 'bg-slate-300'
+              } disabled:opacity-50`}
+            >
+              <div
+                className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                  formData.allow_offline_credit ? 'translate-x-6' : 'translate-x-0.5'
+                }`}
+              />
+            </button>
+          </div>
+
+          <div>
+            <label className="font-bold text-slate-700">Maximum Offline Sale Amount (KES)</label>
+            <input
+              type="number"
+              value={formData.max_offline_sale_kes}
+              onChange={(e) => setFormData({ ...formData, max_offline_sale_kes: parseFloat(e.target.value) || 0 })}
+              disabled={!canManageInventory}
+              className="w-full mt-1 p-2 rounded-xl border border-slate-300 font-bold focus:outline-none disabled:bg-slate-50"
+            />
+            <div className="text-[10px] text-slate-400 mt-1">Cashiers cannot exceed this amount without internet</div>
+          </div>
+
+          <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
+            <div>
+              <div className="font-bold text-slate-900">Allow Negative Stock</div>
+              <div className="text-[10px] text-slate-500">Permit sales even when stock is depleted</div>
+            </div>
+            <button
+              onClick={() => setFormData({ ...formData, allow_negative_stock: !formData.allow_negative_stock })}
+              disabled={!canManageInventory}
+              className={`w-12 h-6 rounded-full transition-colors ${
+                formData.allow_negative_stock ? 'bg-amber-600' : 'bg-slate-300'
+              } disabled:opacity-50`}
+            >
+              <div
+                className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                  formData.allow_negative_stock ? 'translate-x-6' : 'translate-x-0.5'
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+      </Card>
+
+      {/* Realtime Alerts, Email & PWA Notifications */}
+      <Card>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <div className="h-8 w-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
+              <Bell className="h-4 w-4" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">Realtime Alerts, Email &amp; PWA Notifications</h3>
+              <p className="text-[11px] text-slate-500">Live feeds from Supabase for low stock, M-Pesa receipts, and customer repayments</p>
+            </div>
+          </div>
+          <Badge variant={isRealtimeConnected ? 'success' : 'warning'}>
+            {isRealtimeConnected ? 'Realtime Connected' : 'Connecting Feed'}
+          </Badge>
+        </div>
+
+        <div className="space-y-4 text-xs">
+          {/* PWA Push Notifications */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-100">
+            <div>
+              <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                <span>PWA Device &amp; System Notifications</span>
+                <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${browserNotificationPermission === 'granted' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                  {browserNotificationPermission === 'granted' ? 'Active' : 'Permission Required'}
+                </span>
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">
+                Receive pop-up banners on Android, iOS PWA, and desktop when stock depletes or M-Pesa is received.
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleTestPwaNotification}
+              className="font-bold whitespace-nowrap self-start sm:self-auto"
+            >
+              Test PWA Alert
             </Button>
           </div>
-        )}
-      </form>
+
+          {/* Email Alerts */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-100">
+            <div>
+              <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                <Mail className="h-3.5 w-3.5 text-slate-500" />
+                <span>Automated Email Alerts</span>
+                <span className="font-mono text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                  {user?.email || 'kamenengewa@gmail.com'}
+                </span>
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">
+                Automatically emails the store owner whenever stock hits reorder level or high-value payments occur.
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              isLoading={isSendingTestEmail}
+              onClick={handleTestEmailAlert}
+              className="font-bold whitespace-nowrap self-start sm:self-auto shadow-sm"
+            >
+              Send Test Email
+            </Button>
+          </div>
+
+          {/* Procedural Audio Chimes */}
+          <div className="flex items-center justify-between p-3.5 bg-slate-50 rounded-xl border border-slate-100">
+            <div className="flex items-center gap-2.5">
+              {soundEnabled ? (
+                <Volume2 className="h-4 w-4 text-emerald-600" />
+              ) : (
+                <VolumeX className="h-4 w-4 text-slate-400" />
+              )}
+              <div>
+                <div className="font-bold text-slate-900">Audio Alerts (Sound Chime)</div>
+                <div className="text-[11px] text-slate-500">Play distinctive harmonic chimes on POS sales, stock warnings, and M-Pesa receipts</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSoundEnabled(!soundEnabled)}
+              className={`w-12 h-6 rounded-full transition-colors ${
+                soundEnabled ? 'bg-amber-600' : 'bg-slate-300'
+              }`}
+            >
+              <div
+                className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                  soundEnabled ? 'translate-x-6' : 'translate-x-0.5'
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+      </Card>
+
+      {/* Store Owner Profile */}
+      <Card>
+        <div className="flex items-center gap-2 mb-4">
+          <div className="h-8 w-8 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center">
+            <User className="h-4 w-4" />
+          </div>
+          <h3 className="text-sm font-bold text-slate-900">Store Owner Profile</h3>
+        </div>
+
+        <div className="text-xs space-y-2">
+          <div className="flex justify-between">
+            <span className="text-slate-500">Name:</span>
+            <span className="font-bold text-slate-900">{user?.full_name || 'Becky'}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-500">Role:</span>
+            <span className="font-bold text-amber-700">{user?.role || 'Admin'}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-500">Email:</span>
+            <span className="font-mono text-slate-700">{user?.email || 'kamenengewa@gmail.com'}</span>
+          </div>
+        </div>
+      </Card>
     </div>
   );
 }
