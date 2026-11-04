@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { localDb } from '@/lib/dexie/db';
 import { syncEngine } from '@/lib/sync/syncEngine';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { useNotifications } from '@/lib/notifications/NotificationContext';
+import { useAutoRefresh } from '@/lib/sync/useAutoRefresh';
 import { formatKES, formatDate } from '@/lib/utils/formatters';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -26,14 +27,17 @@ export default function PaymentsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [verificationFilter, setVerificationFilter] = useState('all');
 
-  const loadPayments = async () => {
+  const loadPayments = useCallback(async () => {
     const allSales = await localDb.sales.where('status').equals('completed').toArray();
     setSales(allSales);
-  };
+  }, []);
 
   useEffect(() => {
     loadPayments();
-  }, []);
+  }, [loadPayments]);
+
+  // Live Auto-Refresh upon background polling or peer counter sales/payments
+  useAutoRefresh(loadPayments, ['payments', 'sales', 'all']);
 
   // Flatten all payments from sales
   const allPayments = useMemo(() => {

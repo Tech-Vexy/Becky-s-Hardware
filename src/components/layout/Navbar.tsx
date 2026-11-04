@@ -105,7 +105,7 @@ export const Navbar: React.FC = () => {
               {/* Sync / Online Status pill */}
               <button
                 onClick={() => setIsSyncModalOpen(true)}
-                title={`Last sync: ${syncStatus.lastSyncTime ? new Date(syncStatus.lastSyncTime).toLocaleTimeString() : 'Never'}`}
+                title={`Auto-syncing every 15s. Click for Sync Center. Last sync: ${syncStatus.lastSyncTime ? new Date(syncStatus.lastSyncTime).toLocaleTimeString() : 'Never'}`}
                 className={`inline-flex items-center gap-1.5 h-9 rounded-xl border px-3 text-xs font-semibold transition-all duration-150 ${
                   syncStatus.isOnline
                     ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
@@ -115,12 +115,12 @@ export const Navbar: React.FC = () => {
                 {syncStatus.isSyncing ? (
                   <Spinner size="xs" variant={syncStatus.isOnline ? 'emerald' : 'primary'} />
                 ) : syncStatus.isOnline ? (
-                  <Wifi className="h-3.5 w-3.5 text-emerald-600" />
+                  <RefreshCw className="h-3.5 w-3.5 text-emerald-600" />
                 ) : (
                   <CloudOff className="h-3.5 w-3.5 text-amber-600" />
                 )}
                 <span className="hidden md:inline">
-                  {syncStatus.isOnline ? 'Online' : 'Offline'}
+                  {syncStatus.isSyncing ? 'Syncing...' : syncStatus.isOnline ? 'Live Synced' : 'Offline'}
                 </span>
                 {pendingCount > 0 && (
                   <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-600 px-1 text-[10px] font-bold text-white">

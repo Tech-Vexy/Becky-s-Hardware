@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { TagPill, TagInput, TAG_PRESETS } from '@/components/ui/TagInput';
 import { PageHeader } from '@/components/ui/PageHeader';
+import { useAutoRefresh } from '@/lib/sync/useAutoRefresh';
 import {
   Boxes,
   Search,
@@ -73,6 +74,9 @@ export default function CataloguePage() {
   }, []);
 
   useEffect(() => { loadCatalogue(); }, [loadCatalogue]);
+
+  // Live Auto-Refresh upon background polling or peer counter price updates
+  useAutoRefresh(loadCatalogue, ['products', 'all']);
 
   // ── Tag helper — ensure any preset used exists in DB ────────────────────────
   const handleCreateTag = useCallback(async (tag: Omit<ProductTag, 'created_at'>) => {

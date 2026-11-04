@@ -159,6 +159,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(currentSession);
       await loadSupabaseProfile(currentSession.user.id, currentSession.user);
       setIsLoading(false);
+      // Trigger full bi-directional sync on session restoration
+      syncEngine.syncAll().catch((err) => console.warn('Initial session syncAll deferred:', err));
     }).catch((err) => {
       console.warn('Failed to verify Supabase session:', err);
       setSession(null);
@@ -176,6 +178,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await loadSupabaseProfile(newSession.user.id, newSession.user);
         setIsAuthenticated(true);
         setIsLoading(false);
+        syncEngine.syncAll().catch((err) => console.warn('Auth event syncAll deferred:', err));
       } else {
         try {
           localStorage.removeItem(CACHED_PROFILE_KEY);
@@ -228,6 +231,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await loadSupabaseProfile(data.user.id, data.user);
       setIsAuthenticated(true);
       setIsLoading(false);
+      syncEngine.syncAll().catch((err) => console.warn('Login syncAll deferred:', err));
       return { success: true };
     } catch (err: any) {
       setIsLoading(false);

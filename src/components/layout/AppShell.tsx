@@ -198,7 +198,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
     const onMessage = (event: MessageEvent) => {
       if (event.data?.type === 'BACKGROUND_SYNC_TRIGGERED') {
         import('@/lib/sync/syncEngine')
-          .then(({ syncEngine }) => syncEngine.syncPendingQueue())
+          .then(({ syncEngine }) => syncEngine.syncAll())
           .catch(console.error);
       }
     };

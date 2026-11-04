@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { localDb } from '@/lib/dexie/db';
 import { useAuth } from '@/lib/auth/AuthContext';
+import { useAutoRefresh } from '@/lib/sync/useAutoRefresh';
 import { formatKES, formatQuantity, formatDate } from '@/lib/utils/formatters';
 import { StatCard } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -35,9 +36,8 @@ export default function DashboardPage() {
   const [recentSales, setRecentSales] = useState<Sale[]>([]);
   const [lowStockProducts, setLowStockProducts] = useState<Product[]>([]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const loadDashboardData = async () => {
+  const loadDashboardData = useCallback(async () => {
+    try {
       const todayStr = new Date().toISOString().slice(0, 10);
       const [forToday, recent, allProds] = await Promise.all([
         localDb.sales
@@ -48,15 +48,20 @@ export default function DashboardPage() {
         localDb.sales.orderBy('created_at').reverse().limit(10).toArray(),
         localDb.products.filter((x) => x.active === true).toArray(),
       ]);
-      if (cancelled) return;
       setTodaySales(forToday);
       setRecentSales(recent);
       setLowStockProducts(allProds.filter((p) => p.stock_on_hand <= p.low_stock_level));
+    } finally {
       setIsLoading(false);
-    };
-    loadDashboardData();
-    return () => { cancelled = true; };
+    }
   }, []);
+
+  useEffect(() => {
+    loadDashboardData();
+  }, [loadDashboardData]);
+
+  // Live Auto-Refresh upon background polling or peer counter sales
+  useAutoRefresh(loadDashboardData, ['sales', 'products', 'all']);
 
   const { totalGrossSales, totalCash, totalMpesa, unverifiedMpesaCount } = useMemo(() => {
     let gross = 0, cash = 0, mpesa = 0, unverified = 0;

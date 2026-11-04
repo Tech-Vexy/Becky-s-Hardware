@@ -37,7 +37,9 @@ import {
   Eye,
   FileText,
   CalendarDays,
+  RefreshCw,
 } from 'lucide-react';
+import { useAutoRefresh } from '@/lib/sync/useAutoRefresh';
 import type { Product, Customer, PaymentMethod, StockMovement, Sale, Invoice, InvoiceItem, ProductTag } from '@/lib/types/database';
 import { TagPill } from '@/components/ui/TagInput';
 
@@ -118,6 +120,14 @@ export default function POSPage() {
   const [newUnitPriceInput, setNewUnitPriceInput] = useState<string>('');
   const [updateCatalogPermanently, setUpdateCatalogPermanently] = useState(false);
 
+  // Sync Engine live state
+  const [isSyncing, setIsSyncing] = useState(false);
+  useEffect(() => {
+    return syncEngine.subscribe((status) => {
+      setIsSyncing(status.isSyncing);
+    });
+  }, []);
+
   const loadTodaySales = useCallback(async () => {
     try {
       const todayStr = new Date().toISOString().slice(0, 10);
@@ -133,6 +143,16 @@ export default function POSPage() {
       console.warn('Failed to load today sales in POS:', err);
     }
   }, []);
+
+  // Auto-refresh POS daily sales & stock upon background polling or incoming transactions
+  useAutoRefresh(() => {
+    loadTodaySales();
+    localDb.products
+      .filter((x) => x.active === true)
+      .toArray()
+      .then((prods) => setProducts(prods))
+      .catch(() => {});
+  }, ['sales', 'products', 'all']);
 
   // Load products, customers, draft cart & today sales concurrently from Dexie replica
   useEffect(() => {
@@ -1119,14 +1139,28 @@ export default function POSPage() {
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setIsDailySalesModalOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition-all border border-slate-700 shadow-2xs hover:border-slate-600 active:scale-95"
-        >
-          <Receipt className="h-3.5 w-3.5 text-amber-400" />
-          <span>Today&apos;s Sales Log ({todayCount})</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Live Auto-Sync / Polling Button */}
+          <button
+            type="button"
+            onClick={() => syncEngine.triggerImmediateSync('pos_bar_sync')}
+            disabled={isSyncing}
+            title="Auto-syncs every 15s. Click to force immediate cloud sync."
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition-all border border-slate-700 shadow-2xs hover:border-slate-600 active:scale-95 disabled:opacity-60"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 text-emerald-400 ${isSyncing ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">{isSyncing ? 'Syncing...' : 'Auto-Sync'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsDailySalesModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition-all border border-slate-700 shadow-2xs hover:border-slate-600 active:scale-95"
+          >
+            <Receipt className="h-3.5 w-3.5 text-amber-400" />
+            <span>Today&apos;s Sales Log ({todayCount})</span>
+          </button>
+        </div>
       </div>
       {/* Mobile Mode Switcher (Touch tabs) */}
       <div className="flex lg:hidden bg-slate-200/80 p-1 rounded-2xl text-xs font-bold">

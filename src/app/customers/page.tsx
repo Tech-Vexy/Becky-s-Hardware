@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { localDb } from '@/lib/dexie/db';
 import { syncEngine } from '@/lib/sync/syncEngine';
 import { useAuth } from '@/lib/auth/AuthContext';
+import { useAutoRefresh } from '@/lib/sync/useAutoRefresh';
 import { formatKES, formatPhoneKE, formatDate } from '@/lib/utils/formatters';
 import { printThermalReceipt } from '@/lib/utils/receiptPrinter';
 import { Button } from '@/components/ui/Button';
@@ -55,7 +56,7 @@ export default function CustomersPage() {
   const [isStatementModalOpen, setIsStatementModalOpen] = useState(false);
   const [statementCustomer, setStatementCustomer] = useState<Customer | null>(null);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     const [custList, repayList, salesList] = await Promise.all([
       localDb.customers.filter((x) => x.active === true).toArray(),
       localDb.customerRepayments.orderBy('received_at').reverse().toArray(),
@@ -64,11 +65,14 @@ export default function CustomersPage() {
     setCustomers(custList);
     setRepayments(repayList);
     setSales(salesList);
-  };
+  }, []);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
+
+  // Live Auto-Refresh upon background polling or peer counter credit sales/repayments
+  useAutoRefresh(loadData, ['customers', 'sales', 'all']);
 
   // Compute live balances per customer via single-pass aggregation
   const customerLedgers = useMemo(() => {
@@ -244,10 +248,13 @@ export default function CustomersPage() {
     }
 
     if (editingCustomer) {
-      await localDb.customers.update(editingCustomer.id, {
+      const updatedCust = {
+        ...editingCustomer,
         ...formData,
         updated_at: new Date().toISOString(),
-      });
+      };
+      await localDb.customers.put(updatedCust);
+      syncEngine.queueOperation('customer_upsert', updatedCust).catch(console.error);
     } else {
       const newCust: Customer = {
         id: `00000000-0000-0000-0003-${Date.now().toString().slice(-12)}`,
@@ -257,6 +264,7 @@ export default function CustomersPage() {
         updated_at: new Date().toISOString(),
       };
       await localDb.customers.put(newCust);
+      syncEngine.queueOperation('customer_upsert', newCust).catch(console.error);
     }
 
     await loadData();

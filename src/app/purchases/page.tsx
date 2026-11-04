@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { localDb } from '@/lib/dexie/db';
 import { syncEngine } from '@/lib/sync/syncEngine';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { useNotifications } from '@/lib/notifications/NotificationContext';
+import { useAutoRefresh } from '@/lib/sync/useAutoRefresh';
 import { formatKES, formatDate } from '@/lib/utils/formatters';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -38,18 +39,21 @@ export default function PurchasesPage() {
     status: 'pending' as 'pending' | 'ordered' | 'received' | 'cancelled',
   });
 
-  const loadPurchases = async () => {
+  const loadPurchases = useCallback(async () => {
     const [allPurchases, allSuppliers] = await Promise.all([
       localDb.purchases.orderBy('created_at').reverse().toArray(),
       localDb.suppliers.filter((x) => x.active === true).toArray(),
     ]);
     setPurchases(allPurchases);
     setSuppliers(allSuppliers);
-  };
+  }, []);
 
   useEffect(() => {
     loadPurchases();
-  }, []);
+  }, [loadPurchases]);
+
+  // Live Auto-Refresh upon background polling or peer stock receipts
+  useAutoRefresh(loadPurchases, ['purchases', 'all']);
 
   const filteredPurchases = purchases.filter((p) => {
     const q = searchQuery.toLowerCase().trim();

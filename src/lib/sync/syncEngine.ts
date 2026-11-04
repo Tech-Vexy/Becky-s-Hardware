@@ -28,18 +28,70 @@ class SyncEngine {
   private lastError: string | null = null;
   private pendingCount = 0;
   private isOnline = typeof window !== 'undefined' ? window.navigator.onLine : true;
+  private pollIntervalId: any = null;
+  private syncDebounceTimeout: any = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => this.handleNetworkChange(true));
       window.addEventListener('offline', () => this.handleNetworkChange(false));
-      // Periodic auto-sync check every 30 seconds
-      setInterval(() => {
-        if (this.isOnline && !this.isSyncing) {
-          this.syncPendingQueue();
+
+      // Fast auto-refresh polling every 15 seconds when online
+      this.startPolling(15000);
+
+      // Trigger instant background sync when user refocuses the tab / window
+      window.addEventListener('focus', () => {
+        this.triggerImmediateSync('window_focus');
+      });
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          this.triggerImmediateSync('tab_visible');
         }
-      }, 30000);
+      });
     }
+  }
+
+  /**
+   * Starts active polling interval for background cloud updates.
+   */
+  public startPolling(intervalMs: number = 15000): void {
+    if (this.pollIntervalId) {
+      clearInterval(this.pollIntervalId);
+    }
+    this.pollIntervalId = setInterval(() => {
+      // Pause polling if the tab is hidden to conserve device bandwidth/battery
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        return;
+      }
+      if (this.isOnline && !this.isSyncing) {
+        this.syncAll().catch((err) => console.warn('[SyncEngine] Background poll failed:', err));
+      }
+    }, intervalMs);
+  }
+
+  /**
+   * Halts active polling.
+   */
+  public stopPolling(): void {
+    if (this.pollIntervalId) {
+      clearInterval(this.pollIntervalId);
+      this.pollIntervalId = null;
+    }
+  }
+
+  /**
+   * Debounced sync trigger to prevent duplicate requests when multiple focus/online events occur.
+   */
+  public triggerImmediateSync(reason?: string): void {
+    if (this.syncDebounceTimeout) {
+      clearTimeout(this.syncDebounceTimeout);
+    }
+    this.syncDebounceTimeout = setTimeout(() => {
+      if (this.isOnline && !this.isSyncing) {
+        this.syncAll().catch((err) => console.warn(`[SyncEngine] Sync on ${reason} deferred:`, err));
+      }
+    }, 250);
   }
 
   public subscribe(listener: StatusListener): () => void {
@@ -88,8 +140,8 @@ class SyncEngine {
     this.isOnline = online;
     this.notify();
     if (online) {
-      console.log('Network reconnected. Initiating sync...');
-      this.syncPendingQueue();
+      console.log('Network reconnected. Initiating full sync...');
+      this.triggerImmediateSync('network_reconnected');
     }
   }
 
@@ -128,6 +180,10 @@ class SyncEngine {
     const randCode = Math.random().toString(36).substring(2, 8).toUpperCase();
     const receiptNumber = `RCP-${dateStr}-${randCode}`;
     const saleId = `00000000-0000-0000-0006-${Date.now().toString().slice(-12)}`;
+    const sanitizedCustomerId =
+      payload.customer_id && typeof payload.customer_id === 'string' && payload.customer_id.trim()
+        ? payload.customer_id.trim()
+        : null;
 
     // 1. Calculate totals (all money rounded to 2dp)
     let subtotal = 0;
@@ -259,7 +315,7 @@ class SyncEngine {
       const saleRecord: Sale = {
         id: saleId,
         receipt_number: receiptNumber,
-        customer_id: payload.customer_id,
+        customer_id: sanitizedCustomerId,
         customer_name_snapshot: payload.customer_name,
         cashier_id: payload.cashier_id,
         cashier_name_snapshot: payload.cashier_name,
@@ -306,7 +362,7 @@ class SyncEngine {
           offline_id: clientId,
           idempotency_key: idempotencyKey,
           receipt_number: receiptNumber,
-          customer_id: payload.customer_id,
+          customer_id: sanitizedCustomerId,
           // Item-level discounts below already cover negotiated prices and
           // explicit line discounts; a header discount would double-count.
           discount_kes: 0,
@@ -383,6 +439,18 @@ class SyncEngine {
     this.isSyncing = true;
     this.notify();
 
+    try {
+      return await this.executePushQueue();
+    } finally {
+      this.isSyncing = false;
+      this.notify();
+    }
+  }
+
+  /**
+   * Internal worker executing pending mutation queue without lock contention.
+   */
+  private async executePushQueue(): Promise<{ synced: number; failed: number }> {
     let syncedCount = 0;
     let failedCount = 0;
 
@@ -393,8 +461,6 @@ class SyncEngine {
         .toArray();
 
       if (pendingItems.length === 0) {
-        this.isSyncing = false;
-        this.notify();
         return { synced: 0, failed: 0 };
       }
 
@@ -404,6 +470,7 @@ class SyncEngine {
         try {
           if (isSupabaseConfigured()) {
             let syncError: any = null;
+
             if (item.operation_type === 'product_upsert') {
               const { error } = await supabase.from('products').upsert(item.payload);
               syncError = error;
@@ -417,12 +484,40 @@ class SyncEngine {
               } catch (e) {
                 console.warn('Cloud invoice sync fallback:', e);
               }
+            } else if (item.operation_type === 'customer_upsert') {
+              const { error } = await supabase.from('customers').upsert(item.payload);
+              syncError = error;
+            } else if (item.operation_type === 'supplier_upsert') {
+              const { error } = await supabase.from('suppliers').upsert(item.payload);
+              syncError = error;
+            } else if (item.operation_type === 'expense_upsert') {
+              const { error } = await supabase.from('expenses').upsert(item.payload);
+              syncError = error;
+            } else if (item.operation_type === 'purchase_upsert') {
+              const { error } = await supabase.from('purchases').upsert(item.payload);
+              syncError = error;
+            } else if (item.operation_type === 'settings_upsert') {
+              const { error } = await supabase.from('store_settings').upsert(item.payload);
+              syncError = error;
+            } else if (item.operation_type === 'payment_verification') {
+              const { error } = await supabase.rpc('rpc_verify_payment', {
+                p_payment_id: item.payload.payment_id,
+                p_status: item.payload.status,
+                p_notes: item.payload.notes || null,
+              });
+              syncError = error;
+            } else if (item.operation_type === 'checkout') {
+              const { data, error } = await supabase.rpc('rpc_checkout', { payload: item.payload });
+              syncError = error;
+              if (!error && data?.sale_id) {
+                await localDb.offlineReceipts
+                  .where('receipt_number')
+                  .equals(item.payload.receipt_number)
+                  .modify({ sync_status: 'synced', sale_id: data.sale_id });
+              }
             } else {
               let rpcName = '';
               switch (item.operation_type) {
-                case 'checkout':
-                  rpcName = 'rpc_checkout';
-                  break;
                 case 'receive_purchase':
                   rpcName = 'rpc_receive_purchase';
                   break;
@@ -436,26 +531,27 @@ class SyncEngine {
                   rpcName = 'rpc_process_return';
                   break;
                 default:
-                  throw new Error(`Unsupported sync operation type: ${item.operation_type}`);
+                  console.warn(`Unsupported sync operation type: ${item.operation_type}`);
+                  break;
               }
 
-              const { error } = await supabase.rpc(rpcName, { payload: item.payload });
-              syncError = error;
+              if (rpcName) {
+                const { error } = await supabase.rpc(rpcName, { payload: item.payload });
+                syncError = error;
+              }
             }
 
             if (syncError) {
-              // Handle conflict or validation error
               console.error(`Sync RPC error on ${item.idempotency_key}:`, syncError);
 
               // Check for duplicate sales by receipt number
-              if (item.operation_type === 'checkout' && syncError.message?.includes('duplicate')) {
-                // This is a conflict - the sale may already exist remotely
+              if (item.operation_type === 'checkout' && (syncError.message?.includes('duplicate') || syncError.code === '23505')) {
                 await localDb.syncQueue.update(item.id!, {
                   status: 'conflict',
                   last_error: syncError.message,
                   conflict_data: {
                     local_version: item.payload,
-                    remote_version: null, // Will be fetched by conflict resolution UI
+                    remote_version: null,
                     conflict_type: 'duplicate',
                   },
                   retry_count: item.retry_count + 1,
@@ -501,11 +597,8 @@ class SyncEngine {
       this.lastSyncTime = new Date().toISOString();
       this.lastError = failedCount > 0 ? `${failedCount} items failed during sync` : null;
     } catch (globalErr: any) {
-      console.error('Fatal error in syncPendingQueue:', globalErr);
+      console.error('Fatal error in executePushQueue:', globalErr);
       this.lastError = globalErr.message;
-    } finally {
-      this.isSyncing = false;
-      this.notify();
     }
 
     return { synced: syncedCount, failed: failedCount };
@@ -689,7 +782,180 @@ class SyncEngine {
         errors.push(`Invoices pull: ${err.message}`);
       }
 
+      // 6. Pull Sales with Line Items and Payments (Enables cross-browser sync!)
+      try {
+        const { data: remoteSales, error: salesErr } = await supabase
+          .from('sales')
+          .select('*, sale_items(*), payments(*)')
+          .order('created_at', { ascending: false })
+          .limit(200);
+
+        if (!salesErr && remoteSales && remoteSales.length > 0) {
+          for (const s of remoteSales) {
+            // Deduplicate if local sale was saved under temporary client UUID
+            const existingByReceipt = await localDb.sales
+              .where('receipt_number')
+              .equals(s.receipt_number)
+              .first();
+
+            if (existingByReceipt && existingByReceipt.id !== s.id) {
+              await localDb.sales.delete(existingByReceipt.id);
+            }
+
+            const localSale: Sale = {
+              id: s.id,
+              receipt_number: s.receipt_number,
+              customer_id: s.customer_id,
+              customer_name_snapshot: s.customer_name_snapshot,
+              cashier_id: s.cashier_id,
+              cashier_name_snapshot: s.cashier_name_snapshot,
+              status: s.status,
+              subtotal_kes: Number(s.subtotal_kes) || 0,
+              discount_kes: Number(s.discount_kes) || 0,
+              tax_kes: Number(s.tax_kes) || 0,
+              total_kes: Number(s.total_kes) || 0,
+              amount_paid_kes: Number(s.amount_paid_kes) || 0,
+              offline_id: s.offline_id,
+              idempotency_key: s.idempotency_key,
+              is_offline_sync: Boolean(s.is_offline_sync),
+              notes: s.notes,
+              completed_at: s.completed_at,
+              created_at: s.created_at,
+              updated_at: s.updated_at,
+              items: (s.sale_items || []).map((si: any) => ({
+                id: si.id,
+                sale_id: si.sale_id,
+                product_id: si.product_id,
+                product_name_snapshot: si.product_name_snapshot,
+                sku_snapshot: si.sku_snapshot,
+                quantity: Number(si.quantity) || 0,
+                unit_price_kes: Number(si.unit_price_kes) || 0,
+                discount_kes: Number(si.discount_kes) || 0,
+                line_total_kes: Number(si.line_total_kes) || 0,
+              })),
+              payments: (s.payments || []).map((p: any) => ({
+                id: p.id,
+                sale_id: p.sale_id,
+                method: p.method,
+                amount_kes: Number(p.amount_kes) || 0,
+                provider_reference: p.provider_reference,
+                received_by: p.received_by,
+                received_at: p.received_at || p.created_at,
+                verification_status: p.verification_status,
+                verified_by: p.verified_by,
+                verified_at: p.verified_at,
+                notes: p.notes,
+              })),
+            };
+
+            await localDb.sales.put(localSale);
+
+            // Maintain offline receipts ledger for reprinting in all browsers
+            const receiptRecord: OfflineReceiptRecord = {
+              receipt_number: localSale.receipt_number,
+              sale_id: localSale.id,
+              customer_name: localSale.customer_name_snapshot || 'Walk-In Customer',
+              total_kes: localSale.total_kes,
+              amount_paid_kes: localSale.amount_paid_kes,
+              payment_method: (localSale.payments || []).map((p) => p.method).join(', ') || 'cash',
+              provider_reference: (localSale.payments || []).find((p) => p.provider_reference)?.provider_reference || undefined,
+              items_count: localSale.items?.length || 0,
+              cashier_name: localSale.cashier_name_snapshot || 'Staff',
+              created_at: localSale.created_at,
+              sync_status: 'synced',
+            };
+            await localDb.offlineReceipts.put(receiptRecord);
+            pulledCount++;
+          }
+        }
+      } catch (err: any) {
+        errors.push(`Sales pull: ${err.message}`);
+      }
+
+      // 7. Pull Customer Credit Repayments
+      try {
+        const { data: remoteRepays, error: repayErr } = await supabase
+          .from('customer_repayments')
+          .select('*')
+          .order('received_at', { ascending: false })
+          .limit(200);
+
+        if (!repayErr && remoteRepays && remoteRepays.length > 0) {
+          for (const r of remoteRepays) {
+            await localDb.customerRepayments.put({
+              id: r.id,
+              customer_id: r.customer_id,
+              customer_name: r.customer_name || undefined,
+              receipt_number: r.receipt_number,
+              amount_kes: Number(r.amount_kes) || 0,
+              method: r.method,
+              provider_reference: r.provider_reference || r.reference || null,
+              notes: r.notes || null,
+              received_by: r.received_by,
+              received_at: r.received_at,
+            });
+            pulledCount++;
+          }
+        }
+      } catch (err: any) {
+        errors.push(`Repayments pull: ${err.message}`);
+      }
+
+      // 8. Pull Purchases & Stock Orders
+      try {
+        const { data: remotePurchases, error: purchErr } = await supabase
+          .from('purchases')
+          .select('*, purchase_items(*)')
+          .order('created_at', { ascending: false })
+          .limit(100);
+
+        if (!purchErr && remotePurchases && remotePurchases.length > 0) {
+          for (const pu of remotePurchases) {
+            const subtotal = Number(pu.subtotal_kes) || Number(pu.total_kes) || 0;
+            const tax = Number(pu.tax_kes) || 0;
+            const total = Number(pu.total_kes) || subtotal;
+            await localDb.purchases.put({
+              id: pu.id,
+              po_number: pu.po_number,
+              supplier_id: pu.supplier_id,
+              supplier_name: pu.supplier_name || null,
+              status: pu.status,
+              subtotal_kes: subtotal,
+              tax_kes: tax,
+              total_kes: total,
+              expected_delivery: pu.expected_delivery_date || pu.expected_delivery || null,
+              notes: pu.notes || null,
+              created_by: pu.created_by,
+              created_at: pu.created_at,
+              items: (pu.purchase_items || []).map((pi: any) => ({
+                id: pi.id,
+                purchase_id: pi.purchase_id,
+                product_id: pi.product_id,
+                product_name_snapshot: pi.product_name_snapshot || pi.product_name || 'Product',
+                sku_snapshot: pi.sku_snapshot || pi.sku || 'SKU',
+                quantity: Number(pi.quantity) || 0,
+                unit_cost_kes: Number(pi.unit_cost_kes) || 0,
+                line_total_kes: Number(pi.line_total_kes) || 0,
+              })),
+            });
+            pulledCount++;
+          }
+        }
+      } catch (err: any) {
+        errors.push(`Purchases pull: ${err.message}`);
+      }
+
       this.lastSyncTime = new Date().toISOString();
+
+      // Broadcast live event to open UI tabs / windows
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('beckys-hardware:data-refreshed', {
+            detail: { type: 'all', pulled: pulledCount, timestamp: this.lastSyncTime },
+          })
+        );
+        window.dispatchEvent(new CustomEvent('beckys-hardware:sales-updated'));
+      }
     } catch (globalErr: any) {
       console.error('Fatal error during pullRemoteData:', globalErr);
       errors.push(globalErr.message);
@@ -713,7 +979,7 @@ class SyncEngine {
 
     try {
       // Step 1: Push local queue
-      const pushRes = await this.syncPendingQueue();
+      const pushRes = await this.executePushQueue();
 
       // Step 2: Pull remote state
       const pullRes = await this.pullRemoteData();

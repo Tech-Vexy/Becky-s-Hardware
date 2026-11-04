@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { localDb } from '@/lib/dexie/db';
 import { syncEngine } from '@/lib/sync/syncEngine';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { useNotifications } from '@/lib/notifications/NotificationContext';
+import { useAutoRefresh } from '@/lib/sync/useAutoRefresh';
 import { formatKES, formatDate } from '@/lib/utils/formatters';
 import { printTaxInvoice } from '@/lib/utils/invoicePrinter';
 import { Button } from '@/components/ui/Button';
@@ -73,7 +74,7 @@ export default function InvoicesPage() {
   // Selected Invoice Detail preview
   const [selectedInvoiceDetail, setSelectedInvoiceDetail] = useState<Invoice | null>(null);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     // Concurrently load invoices, customers, and active products
     const [invs, custs, prods] = await Promise.all([
       localDb.invoices.orderBy('created_at').reverse().toArray(),
@@ -93,11 +94,14 @@ export default function InvoicesPage() {
       setLineProductId(prods[0].id);
       setLinePrice(prods[0].selling_price_kes.toString());
     }
-  };
+  }, [lineProductId, selectedCustomerId]);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
+
+  // Live Auto-Refresh upon background polling or peer counter invoices
+  useAutoRefresh(loadData, ['invoices', 'customers', 'all']);
 
   const handleCustomerChange = (id: string) => {
     setSelectedCustomerId(id);

@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { localDb } from '@/lib/dexie/db';
 import { syncEngine } from '@/lib/sync/syncEngine';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { useNotifications } from '@/lib/notifications/NotificationContext';
+import { useAutoRefresh } from '@/lib/sync/useAutoRefresh';
 import { formatKES, formatQuantity, formatDate } from '@/lib/utils/formatters';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -94,7 +95,7 @@ export default function InventoryPage() {
     allow_decimal: false,
   });
 
-  const loadInventory = async () => {
+  const loadInventory = useCallback(async () => {
     // Concurrently fetch movements, products, and categories
     const [movs, prods, cats] = await Promise.all([
       localDb.stockMovements.orderBy('created_at').reverse().toArray(),
@@ -110,7 +111,7 @@ export default function InventoryPage() {
       setSelectedProductId(prods[0].id);
       syncAdjFieldsWithProduct(prods[0]);
     }
-  };
+  }, [selectedProductId]);
 
   const syncAdjFieldsWithProduct = (prod: Product) => {
     setCountedStock(prod.stock_on_hand.toString());
@@ -123,7 +124,10 @@ export default function InventoryPage() {
 
   useEffect(() => {
     loadInventory();
-  }, []);
+  }, [loadInventory]);
+
+  // Live auto-refresh inventory upon background polling, returns, or purchases
+  useAutoRefresh(loadInventory, ['products', 'purchases', 'all']);
 
   // Single-pass memoized stock valuation calculations
   const { totalStockUnits, totalCostValuation, totalRetailValuation, potentialMargin } = useMemo(() => {
