@@ -20,6 +20,7 @@ import {
   Settings,
   X,
   FileText,
+  BookOpen,
 } from 'lucide-react';
 
 const MAIN_NAV_ITEMS = [
@@ -30,6 +31,7 @@ const MAIN_NAV_ITEMS = [
 ];
 
 const MORE_MODULES = [
+  { name: 'Financial Ledger',       href: '/ledger',      icon: BookOpen,    desc: 'Unified cash book & balance',    color: 'from-cyan-500 to-cyan-600' },
   { name: 'Invoices & Billing',     href: '/invoices',    icon: FileText,   desc: 'KRA tax invoices & A4 PDF',     color: 'from-purple-500 to-purple-600' },
   { name: 'Purchases & Receiving',  href: '/purchases',   icon: Truck,      desc: 'Stock in & supplier POs',       color: 'from-blue-500 to-blue-600' },
   { name: 'Customers & Credit',     href: '/customers',   icon: Users,      desc: 'Ledger & repayments',           color: 'from-emerald-500 to-emerald-600' },
