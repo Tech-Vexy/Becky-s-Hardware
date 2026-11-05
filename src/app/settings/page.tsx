@@ -57,6 +57,7 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<StoreSettings | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isSendingTestEmail, setIsSendingTestEmail] = useState(false);
+  const [isBroadcastingPusher, setIsBroadcastingPusher] = useState(false);
   const [isSendingDailyPreview, setIsSendingDailyPreview] = useState(false);
   const [dailySummaryConfig, setDailySummaryConfig] = useState<DailySummaryConfig>({
     ...DEFAULT_DAILY_SUMMARY_CONFIG,
@@ -195,6 +196,36 @@ export default function SettingsPage() {
       showToast('system', 'Email Alert Dispatched', `Alert sent to ${targetEmail} via Resend.`);
     } else {
       showToast('system', 'Email Failed', 'Could not dispatch email. Check server logs.');
+    }
+  };
+
+  const handleTestPusherBroadcast = async () => {
+    setIsBroadcastingPusher(true);
+    try {
+      const res = await fetch('/api/pusher/trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          channel: 'beckys-hardware-channel',
+          event: 'store-announcement',
+          data: {
+            title: 'Pusher Live Broadcast Test',
+            message: `Realtime WebSocket event received successfully at ${new Date().toLocaleTimeString()}.`,
+            timestamp: new Date().toISOString(),
+          },
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast('system', 'Pusher Broadcast Sent', 'Live event broadcast to beckys-hardware-channel.');
+      } else {
+        showToast('system', 'Pusher Error', data.error || 'Failed to trigger event. Verify Pusher credentials in .env.local.');
+      }
+    } catch (err: any) {
+      showToast('system', 'Pusher Network Error', err?.message || 'Could not contact Pusher API endpoint.');
+    } finally {
+      setIsBroadcastingPusher(false);
     }
   };
 
@@ -678,9 +709,21 @@ export default function SettingsPage() {
                 Broadcasts real-time counter sales, daily reports, and low-stock alarms to all active store devices via Pusher channels.
               </div>
             </div>
-            <span className="text-[10px] font-bold text-slate-400 font-mono">
-              pusher-js v8.6.0
-            </span>
+            <div className="flex items-center gap-2 self-start sm:self-auto">
+              <span className="text-[10px] font-bold text-slate-400 font-mono hidden sm:inline">
+                pusher-js v8.6.0
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                isLoading={isBroadcastingPusher}
+                onClick={handleTestPusherBroadcast}
+                className="font-bold whitespace-nowrap shadow-sm text-xs"
+              >
+                Broadcast Test
+              </Button>
+            </div>
           </div>
 
           {/* Procedural Audio Chimes */}
