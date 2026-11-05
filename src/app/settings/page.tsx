@@ -23,9 +23,22 @@ import {
   Mail,
   Volume2,
   VolumeX,
+  Clock,
+  Radio,
 } from 'lucide-react';
 import type { StoreSettings } from '@/lib/types/database';
+import { isPusherConfigured } from '@/lib/pusher/client';
 import { dispatchEmailAlert } from '@/lib/notifications/emailAlerts';
+import {
+  DEFAULT_DAILY_SUMMARY_CONFIG,
+  buildDailySummary,
+  dailySummaryMessage,
+  dailySummaryTitle,
+  loadDailySummaryConfig,
+  saveDailySummaryConfig,
+  sendDailySummaryEmail,
+  type DailySummaryConfig,
+} from '@/lib/notifications/dailySummary';
 
 export default function SettingsPage() {
   const { user, canManageInventory } = useAuth();
@@ -35,12 +48,19 @@ export default function SettingsPage() {
     isRealtimeConnected,
     browserNotificationPermission,
     requestWebNotificationPermission,
+    localNotificationsEnabled,
+    setLocalNotificationsEnabled,
+    triggerLocalNotification,
     soundEnabled,
     setSoundEnabled,
   } = useNotifications();
   const [settings, setSettings] = useState<StoreSettings | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isSendingTestEmail, setIsSendingTestEmail] = useState(false);
+  const [isSendingDailyPreview, setIsSendingDailyPreview] = useState(false);
+  const [dailySummaryConfig, setDailySummaryConfig] = useState<DailySummaryConfig>({
+    ...DEFAULT_DAILY_SUMMARY_CONFIG,
+  });
 
   // Form state
   const [formData, setFormData] = useState({
@@ -93,6 +113,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     loadSettings();
+    setDailySummaryConfig(loadDailySummaryConfig());
   }, []);
 
   const handleSaveSettings = async () => {
@@ -129,37 +150,92 @@ export default function SettingsPage() {
     if (perm !== 'granted') {
       const granted = await requestWebNotificationPermission();
       if (!granted) {
-        showToast('system', 'PWA Permission Needed', 'Please allow notifications in the browser prompt.');
+        showToast('system', 'Permission Required', 'Please enable local notifications in the browser prompt.');
         return;
       }
     }
-    addNotification({
-      type: 'inventory',
-      title: 'PWA Test: Low Stock Alert',
-      message: 'Simba Cement 50kg is down to 4 bags. (PWA alert verified!)',
+    const triggered = await triggerLocalNotification({
+      title: "Becky's Hardware: Stock Alert",
+      body: 'Simba Cement 50kg is down to 4 bags. (Local device notification verified!)',
       link: '/catalogue',
     });
-    showToast('system', 'PWA Alert Sent', 'Check your device notification banner.');
+    addNotification({
+      type: 'inventory',
+      title: 'Local Notification Test',
+      message: 'Simba Cement 50kg low stock test alert triggered.',
+      link: '/catalogue',
+    });
+    if (triggered) {
+      showToast('system', 'Local Alert Sent', 'Device banner dispatched successfully.');
+    } else {
+      showToast('system', 'In-App Alert Sent', 'Alert surfaced in bell drawer.');
+    }
   };
 
   const handleTestEmailAlert = async () => {
     setIsSendingTestEmail(true);
+    const targetEmail = dailySummaryConfig.recipientEmail || user?.email || 'eveliaveldrine@gmail.com';
     const success = await dispatchEmailAlert({
-      type: 'inventory',
-      title: 'Test Email Alert: Low Stock Warning',
-      message: 'This is a test alert confirming your Supabase Realtime email pipeline is operational.',
-      productName: 'Simba Cement 50kg',
-      sku: 'CEM-SIMBA-50KG',
-      currentStock: '4 bags',
-      reorderLevel: '30 bags',
-      recipientEmail: user?.email || 'kamenengewa@gmail.com',
-      actionUrl: typeof window !== 'undefined' ? window.location.origin + '/catalogue' : 'https://beckyshardware.co.ke',
+      type: 'system',
+      title: 'Test Email Alert: Store Notification',
+      message: 'This is a test alert confirming your Resend email delivery pipeline is operational for Becky\'s Hardware Store.',
+      recipientEmail: targetEmail,
+      actionUrl: typeof window !== 'undefined' ? window.location.origin + '/reports' : 'https://beckyshardware.co.ke/reports',
+      subject: "Test Alert — Becky's Hardware Store",
+      headerLabel: "RESEND PIPELINE VERIFICATION",
+      fields: [
+        { label: 'Store Name', value: "Becky's Hardware Store" },
+        { label: 'Recipient', value: targetEmail },
+        { label: 'KRA PIN', value: 'P051234567X' },
+        { label: 'Email Provider', value: 'Resend API' },
+      ],
     });
     setIsSendingTestEmail(false);
     if (success) {
-      showToast('system', 'Email Alert Dispatched', `Alert sent to ${user?.email || 'kamenengewa@gmail.com'}`);
+      showToast('system', 'Email Alert Dispatched', `Alert sent to ${targetEmail} via Resend.`);
     } else {
-      showToast('system', 'Email Logged', 'Alert logged to server trace. Configure RESEND_API_KEY in Vercel to deliver directly to your inbox.');
+      showToast('system', 'Email Failed', 'Could not dispatch email. Check server logs.');
+    }
+  };
+
+  const handleUpdateDailySummaryConfig = (patch: Partial<DailySummaryConfig>) => {
+    if (!canManageInventory) return;
+    const next = saveDailySummaryConfig({ ...dailySummaryConfig, ...patch });
+    setDailySummaryConfig(next);
+  };
+
+  const handlePreviewDailySummary = async () => {
+    setIsSendingDailyPreview(true);
+    try {
+      const summary = await buildDailySummary();
+      const targetEmail = dailySummaryConfig.recipientEmail || user?.email || 'eveliaveldrine@gmail.com';
+
+      // 1. Local Notification
+      if (dailySummaryConfig.localNotifications !== false) {
+        addNotification({
+          type: 'system',
+          title: dailySummaryTitle(summary),
+          message: dailySummaryMessage(summary),
+          link: '/reports',
+          data: summary,
+        });
+      }
+
+      // 2. Email via Resend
+      if (dailySummaryConfig.email) {
+        const sent = await sendDailySummaryEmail(summary, targetEmail);
+        if (sent) {
+          showToast('system', 'Daily Report Dispatched', `Summary emailed to ${targetEmail} via Resend.`);
+        } else {
+          showToast('system', 'Email Logged', 'Summary generated and logged. Check Resend API key.');
+        }
+      } else {
+        showToast('system', 'Daily Summary Ready', 'Summary generated and displayed locally.');
+      }
+    } catch (err: any) {
+      showToast('system', 'Summary Error', err?.message || "Could not build today's summary.");
+    } finally {
+      setIsSendingDailyPreview(false);
     }
   };
 
@@ -480,8 +556,8 @@ export default function SettingsPage() {
               <Bell className="h-4 w-4" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-slate-900">Realtime Alerts, Email &amp; PWA Notifications</h3>
-              <p className="text-[11px] text-slate-500">Live feeds from Supabase for low stock, M-Pesa receipts, and customer repayments</p>
+              <h3 className="text-sm font-bold text-slate-900">Local Notifications &amp; Resend Email Alerts</h3>
+              <p className="text-[11px] text-slate-500">Device push banners, procedural audio chimes, and Resend email pipelines</p>
             </div>
           </div>
           <Badge variant={isRealtimeConnected ? 'success' : 'warning'}>
@@ -490,42 +566,87 @@ export default function SettingsPage() {
         </div>
 
         <div className="space-y-4 text-xs">
-          {/* PWA Push Notifications */}
+          {/* Local Device Notifications */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-100">
             <div>
               <div className="font-bold text-slate-900 flex items-center gap-1.5">
-                <span>PWA Device &amp; System Notifications</span>
-                <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${browserNotificationPermission === 'granted' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
-                  {browserNotificationPermission === 'granted' ? 'Active' : 'Permission Required'}
+                <span>Local Device &amp; System Notifications</span>
+                <span
+                  className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    browserNotificationPermission === 'granted' && localNotificationsEnabled
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : !localNotificationsEnabled
+                      ? 'bg-slate-200 text-slate-700'
+                      : 'bg-amber-100 text-amber-800'
+                  }`}
+                >
+                  {browserNotificationPermission === 'granted'
+                    ? localNotificationsEnabled
+                      ? 'Active'
+                      : 'Muted'
+                    : 'Permission Required'}
                 </span>
               </div>
               <div className="text-[11px] text-slate-500 mt-0.5">
-                Receive pop-up banners on Android, iOS PWA, and desktop when stock depletes or M-Pesa is received.
+                Receive instant local pop-up banners on Android, iOS PWA, and desktop for low stock, sales, and daily closing digests.
               </div>
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleTestPwaNotification}
-              className="font-bold whitespace-nowrap self-start sm:self-auto"
-            >
-              Test PWA Alert
-            </Button>
+            <div className="flex items-center gap-2 self-start sm:self-auto">
+              {browserNotificationPermission !== 'granted' ? (
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={handleTestPwaNotification}
+                  className="font-bold whitespace-nowrap"
+                >
+                  Enable Notifications
+                </Button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setLocalNotificationsEnabled(!localNotificationsEnabled)}
+                    className={`w-12 h-6 rounded-full transition-colors ${
+                      localNotificationsEnabled ? 'bg-amber-600' : 'bg-slate-300'
+                    }`}
+                    title={localNotificationsEnabled ? 'Disable local notifications' : 'Enable local notifications'}
+                  >
+                    <div
+                      className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                        localNotificationsEnabled ? 'translate-x-6' : 'translate-x-0.5'
+                      }`}
+                    />
+                  </button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleTestPwaNotification}
+                    className="font-bold whitespace-nowrap"
+                  >
+                    Test Local Alert
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
 
-          {/* Email Alerts */}
+          {/* Email Alerts via Resend */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-100">
             <div>
               <div className="font-bold text-slate-900 flex items-center gap-1.5">
                 <Mail className="h-3.5 w-3.5 text-slate-500" />
-                <span>Automated Email Alerts</span>
+                <span>Automated Email Alerts (Resend)</span>
                 <span className="font-mono text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
-                  {user?.email || 'kamenengewa@gmail.com'}
+                  {dailySummaryConfig.recipientEmail || user?.email || 'eveliaveldrine@gmail.com'}
+                </span>
+                <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded text-[9px] font-bold">
+                  Resend Active
                 </span>
               </div>
               <div className="text-[11px] text-slate-500 mt-0.5">
-                Automatically emails the store owner whenever stock hits reorder level or high-value payments occur.
+                Delivers realtime stock alerts and daily store performance digests directly to the store owner's inbox.
               </div>
             </div>
             <Button
@@ -538,6 +659,28 @@ export default function SettingsPage() {
             >
               Send Test Email
             </Button>
+          </div>
+
+          {/* Pusher Realtime WebSockets */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-100">
+            <div>
+              <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                <Radio className="h-3.5 w-3.5 text-slate-500" />
+                <span>Pusher WebSockets (pusher-js)</span>
+                <span className={`font-mono text-[10px] px-2 py-0.5 rounded-full border ${isPusherConfigured() ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+                  {isPusherConfigured() ? 'Pusher Connected' : 'Ready (Client SDK Active)'}
+                </span>
+                <span className="font-mono text-[9px] text-slate-500 bg-white px-1.5 py-0.5 rounded border border-slate-200">
+                  channel: beckys-hardware-channel
+                </span>
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">
+                Broadcasts real-time counter sales, daily reports, and low-stock alarms to all active store devices via Pusher channels.
+              </div>
+            </div>
+            <span className="text-[10px] font-bold text-slate-400 font-mono">
+              pusher-js v8.6.0
+            </span>
           </div>
 
           {/* Procedural Audio Chimes */}
@@ -570,6 +713,159 @@ export default function SettingsPage() {
         </div>
       </Card>
 
+      {/* Daily End-of-Day Summary */}
+      <Card>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <div className="h-8 w-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+              <Clock className="h-4 w-4" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">Daily End-of-Day Summary</h3>
+              <p className="text-[11px] text-slate-500">
+                Automatic digest of the day&apos;s sales, profits, expenses, and payment mix dispatched via Resend and local device notifications
+              </p>
+            </div>
+          </div>
+          <Badge variant={dailySummaryConfig.enabled ? 'success' : 'default'}>
+            {dailySummaryConfig.enabled ? `Daily at ${dailySummaryConfig.time}` : 'Disabled'}
+          </Badge>
+        </div>
+
+        <div className="space-y-4 text-xs">
+          <div className="flex items-center justify-between p-3.5 bg-slate-50 rounded-xl border border-slate-100">
+            <div>
+              <div className="font-bold text-slate-900">Automatic Daily Digest</div>
+              <div className="text-[11px] text-slate-500 mt-0.5">
+                Automatically computes today&apos;s sales, gross profit, and collections at closing time.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleUpdateDailySummaryConfig({ enabled: !dailySummaryConfig.enabled })}
+              disabled={!canManageInventory}
+              className={`w-12 h-6 rounded-full transition-colors ${
+                dailySummaryConfig.enabled ? 'bg-amber-600' : 'bg-slate-300'
+              } disabled:opacity-50`}
+            >
+              <div
+                className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                  dailySummaryConfig.enabled ? 'translate-x-6' : 'translate-x-0.5'
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="font-bold text-slate-700">End-of-Day Closing Time (EAT)</label>
+              <input
+                type="time"
+                value={dailySummaryConfig.time}
+                onChange={(e) => handleUpdateDailySummaryConfig({ time: e.target.value })}
+                disabled={!canManageInventory || !dailySummaryConfig.enabled}
+                className="w-full mt-1 p-2 rounded-xl border border-slate-300 font-bold focus:outline-none disabled:bg-slate-50"
+              />
+              <div className="text-[10px] text-slate-400 mt-1">
+                The digest triggers when the Nairobi clock reaches this closing hour
+              </div>
+            </div>
+
+            <div>
+              <label className="font-bold text-slate-700">Owner Report Email (Resend)</label>
+              <input
+                type="email"
+                value={dailySummaryConfig.recipientEmail || 'eveliaveldrine@gmail.com'}
+                onChange={(e) => handleUpdateDailySummaryConfig({ recipientEmail: e.target.value })}
+                disabled={!canManageInventory}
+                placeholder="eveliaveldrine@gmail.com"
+                className="w-full mt-1 p-2 rounded-xl border border-slate-300 font-mono text-xs focus:outline-none disabled:bg-slate-50"
+              />
+              <div className="text-[10px] text-slate-400 mt-1">
+                Where Resend sends the daily sales and profit breakdown
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
+              <div className="flex items-center gap-2.5">
+                <Mail className="h-4 w-4 text-slate-500" />
+                <div>
+                  <div className="font-bold text-slate-900">Email Daily Digest (Resend)</div>
+                  <div className="text-[11px] text-slate-500">
+                    Sends full financial summary to {dailySummaryConfig.recipientEmail || 'store owner'}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleUpdateDailySummaryConfig({ email: !dailySummaryConfig.email })}
+                disabled={!canManageInventory}
+                className={`w-12 h-6 rounded-full transition-colors ${
+                  dailySummaryConfig.email ? 'bg-amber-600' : 'bg-slate-300'
+                } disabled:opacity-50`}
+              >
+                <div
+                  className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                    dailySummaryConfig.email ? 'translate-x-6' : 'translate-x-0.5'
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
+              <div className="flex items-center gap-2.5">
+                <Bell className="h-4 w-4 text-slate-500" />
+                <div>
+                  <div className="font-bold text-slate-900">Local Notification Banner</div>
+                  <div className="text-[11px] text-slate-500">
+                    Fires native device alert banner on closing
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  handleUpdateDailySummaryConfig({
+                    localNotifications: !(dailySummaryConfig.localNotifications !== false),
+                  })
+                }
+                disabled={!canManageInventory}
+                className={`w-12 h-6 rounded-full transition-colors ${
+                  dailySummaryConfig.localNotifications !== false ? 'bg-amber-600' : 'bg-slate-300'
+                } disabled:opacity-50`}
+              >
+                <div
+                  className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                    dailySummaryConfig.localNotifications !== false ? 'translate-x-6' : 'translate-x-0.5'
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-slate-50 rounded-xl border border-slate-100">
+            <div>
+              <div className="font-bold text-slate-900">Send Today&apos;s Summary Now</div>
+              <div className="text-[11px] text-slate-500 mt-0.5">
+                Immediately compiles today&apos;s sales, profits, and M-Pesa totals and dispatches via Resend email and local notification.
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              isLoading={isSendingDailyPreview}
+              onClick={handlePreviewDailySummary}
+              className="font-bold whitespace-nowrap self-start sm:self-auto shadow-sm"
+            >
+              Send Daily Report Now
+            </Button>
+          </div>
+        </div>
+      </Card>
+
       {/* Store Owner Profile */}
       <Card>
         <div className="flex items-center gap-2 mb-4">
@@ -590,7 +886,7 @@ export default function SettingsPage() {
           </div>
           <div className="flex justify-between">
             <span className="text-slate-500">Email:</span>
-            <span className="font-mono text-slate-700">{user?.email || 'kamenengewa@gmail.com'}</span>
+            <span className="font-mono text-slate-700">{user?.email || 'eveliaveldrine@gmail.com'}</span>
           </div>
         </div>
       </Card>

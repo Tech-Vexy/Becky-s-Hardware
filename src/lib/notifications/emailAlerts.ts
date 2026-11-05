@@ -16,6 +16,12 @@ interface DispatchEmailAlertParams {
   reference?: string;
   recipientEmail?: string;
   actionUrl?: string;
+  /** Overrides the default "[ALERT] …" email subject (used for daily reports). */
+  subject?: string;
+  /** Overrides the default "REALTIME STORE ALERT" email header label. */
+  headerLabel?: string;
+  /** Extra label/value rows rendered inside the email body. */
+  fields?: Array<{ label: string; value: string }>;
   throttleKey?: string; // Optional unique key (e.g. sku or payment reference)
 }
 

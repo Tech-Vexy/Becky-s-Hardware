@@ -21,15 +21,26 @@ import {
   Smartphone,
   CreditCard,
   Calendar,
+  Mail,
 } from 'lucide-react';
 import type { Sale, Expense, CustomerRepayment, Product } from '@/lib/types/database';
+import { useNotifications } from '@/lib/notifications/NotificationContext';
+import {
+  buildDailySummary,
+  sendDailySummaryEmail,
+  dailySummaryTitle,
+  dailySummaryMessage,
+  loadDailySummaryConfig,
+} from '@/lib/notifications/dailySummary';
 
 export default function ReportsPage() {
   const { user, role, hasRole } = useAuth();
+  const { showToast, addNotification } = useNotifications();
   const [sales, setSales] = useState<Sale[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [repayments, setRepayments] = useState<CustomerRepayment[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [isSendingReport, setIsSendingReport] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -184,6 +195,36 @@ export default function ReportsPage() {
     window.print();
   };
 
+  const handleEmailDailyReport = async () => {
+    setIsSendingReport(true);
+    try {
+      const summary = await buildDailySummary();
+      const config = loadDailySummaryConfig();
+      const targetEmail = config.recipientEmail || user?.email || 'eveliaveldrine@gmail.com';
+
+      // Fire local notification
+      addNotification({
+        type: 'system',
+        title: dailySummaryTitle(summary),
+        message: dailySummaryMessage(summary),
+        link: '/reports',
+        data: summary,
+      });
+
+      // Send via Resend
+      const success = await sendDailySummaryEmail(summary, targetEmail);
+      if (success) {
+        showToast('system', 'Daily Report Sent', `Today's summary dispatched to ${targetEmail} via Resend.`);
+      } else {
+        showToast('system', 'Report Alert Logged', 'Summary computed. Verify RESEND_API_KEY if delivery failed.');
+      }
+    } catch (err: any) {
+      showToast('system', 'Error', err?.message || 'Failed to dispatch daily report');
+    } finally {
+      setIsSendingReport(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -195,15 +236,28 @@ export default function ReportsPage() {
           </p>
         </div>
 
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handlePrintZReport}
-          className="flex items-center gap-1.5 font-bold"
-        >
-          <Printer className="h-4 w-4" />
-          <span>Print Daily Z-Report</span>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handlePrintZReport}
+            className="flex items-center gap-1.5 font-bold"
+          >
+            <Printer className="h-4 w-4" />
+            <span>Print Z-Report</span>
+          </Button>
+
+          <Button
+            variant="primary"
+            size="sm"
+            isLoading={isSendingReport}
+            onClick={handleEmailDailyReport}
+            className="flex items-center gap-1.5 font-bold shadow-sm"
+          >
+            <Mail className="h-4 w-4" />
+            <span>Email Daily Report</span>
+          </Button>
+        </div>
       </div>
 
       {/* Daily Register Z-Report Box */}

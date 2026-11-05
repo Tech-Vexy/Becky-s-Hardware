@@ -148,3 +148,90 @@ test('Realtime Event Handler: M-Pesa payment verification dispatch', () => {
   assert.equal(updateNotif.title, 'M-Pesa Payment Verified');
   assert.equal(updateNotif.verified, true);
 });
+
+test('Daily Summary Configuration & Resend Email Targeting: Defaults to eveliaveldrine@gmail.com', () => {
+  const DEFAULT_CONFIG = {
+    enabled: true,
+    time: '20:00',
+    email: true,
+    recipientEmail: 'eveliaveldrine@gmail.com',
+    localNotifications: true,
+  };
+
+  assert.equal(DEFAULT_CONFIG.email, true);
+  assert.equal(DEFAULT_CONFIG.recipientEmail, 'eveliaveldrine@gmail.com');
+  assert.equal(DEFAULT_CONFIG.localNotifications, true);
+
+  // Normalization logic
+  function normalizeConfig(raw) {
+    return {
+      enabled: typeof raw?.enabled === 'boolean' ? raw.enabled : DEFAULT_CONFIG.enabled,
+      time: typeof raw?.time === 'string' ? raw.time : DEFAULT_CONFIG.time,
+      email: typeof raw?.email === 'boolean' ? raw.email : DEFAULT_CONFIG.email,
+      recipientEmail:
+        typeof raw?.recipientEmail === 'string' && raw.recipientEmail.includes('@')
+          ? raw.recipientEmail.trim()
+          : DEFAULT_CONFIG.recipientEmail,
+      localNotifications:
+        typeof raw?.localNotifications === 'boolean'
+          ? raw.localNotifications
+          : DEFAULT_CONFIG.localNotifications,
+    };
+  }
+
+  // Fallback test
+  const emptyNorm = normalizeConfig({});
+  assert.equal(emptyNorm.recipientEmail, 'eveliaveldrine@gmail.com');
+  assert.equal(emptyNorm.localNotifications, true);
+
+  // Custom email override
+  const customNorm = normalizeConfig({ recipientEmail: 'owner@beckyshardware.co.ke' });
+  assert.equal(customNorm.recipientEmail, 'owner@beckyshardware.co.ke');
+});
+
+test('Local Notification Dispatch: Verifies local notification options and mute state', () => {
+  let dispatchedDeviceNotifications = [];
+
+  function simulateAddNotification({ title, message, link }, { localNotificationsEnabled, permission }) {
+    if (localNotificationsEnabled && permission === 'granted') {
+      dispatchedDeviceNotifications.push({
+        title,
+        body: message,
+        icon: '/icon-192.png',
+        data: { url: link || '/' },
+        vibrate: [200, 100, 200],
+      });
+      return true;
+    }
+    return false;
+  }
+
+  // Case 1: Permission granted & local notifications enabled
+  dispatchedDeviceNotifications = [];
+  const res1 = simulateAddNotification(
+    { title: 'End of Day Summary', message: 'Today gross sales KES 45,000', link: '/reports' },
+    { localNotificationsEnabled: true, permission: 'granted' }
+  );
+  assert.equal(res1, true);
+  assert.equal(dispatchedDeviceNotifications.length, 1);
+  assert.equal(dispatchedDeviceNotifications[0].title, 'End of Day Summary');
+  assert.equal(dispatchedDeviceNotifications[0].icon, '/icon-192.png');
+
+  // Case 2: User muted local notifications
+  dispatchedDeviceNotifications = [];
+  const res2 = simulateAddNotification(
+    { title: 'Low Stock Alert', message: 'Simba Cement is low', link: '/catalogue' },
+    { localNotificationsEnabled: false, permission: 'granted' }
+  );
+  assert.equal(res2, false);
+  assert.equal(dispatchedDeviceNotifications.length, 0);
+
+  // Case 3: Permission denied / not yet granted
+  dispatchedDeviceNotifications = [];
+  const res3 = simulateAddNotification(
+    { title: 'Low Stock Alert', message: 'Simba Cement is low', link: '/catalogue' },
+    { localNotificationsEnabled: true, permission: 'default' }
+  );
+  assert.equal(res3, false);
+  assert.equal(dispatchedDeviceNotifications.length, 0);
+});

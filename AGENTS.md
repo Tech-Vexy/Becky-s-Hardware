@@ -54,3 +54,18 @@ This document serves as the permanent reference guide for agents and developers 
   - Authenticated sessions visiting `/login` are redirected to `/`.
 - **Deployment Security Headers**:
   - Standard security headers (CSP, HSTS, X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy) are enforced via `next.config.mjs` and `vercel.json`.
+
+---
+
+## 6. Daily Reports, Resend Email Delivery & Pusher Local Notifications
+- **Email Dispatcher (Resend)**:
+  - Daily financial and inventory summary digests dispatched to store owner `eveliaveldrine@gmail.com` via Resend API.
+  - From address: `"Becky's Hardware Store <onboarding@resend.dev>"` with `Reply-To: eveliaveldrine@gmail.com`.
+  - Manual 1-click email dispatch from Reports (`/reports`) and Settings (`/settings`), plus automatic closing time trigger.
+- **Local Device Notifications**:
+  - Native PWA and device notification banners powered by Service Worker (`sw.js`) and Web Notifications API.
+  - User-configurable local notifications toggle in Settings with permission request workflow and test alert.
+- **Pusher WebSockets (`pusher-js`)**:
+  - Integrated client library `pusher-js` (`PusherListener`) subscribing to `beckys-hardware-channel`.
+  - Broadcasts storewide realtime events (`daily-summary`, `stock-alert`, `payment-received`, `store-announcement`).
+

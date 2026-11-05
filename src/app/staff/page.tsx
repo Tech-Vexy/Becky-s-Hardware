@@ -27,7 +27,7 @@ export default function StaffPage() {
     {
       id: user?.user_id || '00000000-0000-0000-0000-000000000001',
       full_name: user?.full_name || 'Becky',
-      email: user?.email || 'kamenengewa@gmail.com',
+      email: user?.email || 'eveliaveldrine@gmail.com',
       role: role || 'admin',
       phone: '+254 712 345 678',
       joined_date: '2024-01-15',
@@ -109,7 +109,7 @@ export default function StaffPage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
               <div className="flex items-center gap-2">
                 <Mail className="h-4 w-4 text-slate-400" />
-                <span className="text-slate-700">{user?.email || 'kamenengewa@gmail.com'}</span>
+                <span className="text-slate-700">{user?.email || 'eveliaveldrine@gmail.com'}</span>
               </div>
               <div className="flex items-center gap-2">
                 <Phone className="h-4 w-4 text-slate-400" />

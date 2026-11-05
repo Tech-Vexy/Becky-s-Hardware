@@ -6,6 +6,7 @@ import { playNotificationSound } from '@/lib/notifications/sound';
 
 const STORAGE_KEY = 'beckys_hardware_notifications';
 const SOUND_ENABLED_KEY = 'beckys_hardware_notifications_sound';
+const LOCAL_NOTIFS_KEY = 'beckys_hardware_local_notifications_enabled';
 
 const INITIAL_NOTIFICATIONS: AppNotification[] = [];
 
@@ -17,6 +18,9 @@ interface NotificationContextType {
   setIsRealtimeConnected: (connected: boolean) => void;
   soundEnabled: boolean;
   setSoundEnabled: (enabled: boolean) => void;
+  localNotificationsEnabled: boolean;
+  setLocalNotificationsEnabled: (enabled: boolean) => void;
+  triggerLocalNotification: (params: { title: string; body: string; link?: string; tag?: string }) => Promise<boolean>;
   addNotification: (params: {
     type: NotificationType;
     title: string;
@@ -41,6 +45,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
   const [soundEnabled, setSoundEnabledState] = useState(true);
+  const [localNotificationsEnabled, setLocalNotificationsEnabledState] = useState(true);
   const [browserNotificationPermission, setBrowserNotificationPermission] = useState<
     NotificationPermission | 'unsupported'
   >('default');
@@ -67,6 +72,11 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       const storedSound = localStorage.getItem(SOUND_ENABLED_KEY);
       if (storedSound !== null) {
         setSoundEnabledState(storedSound === 'true');
+      }
+
+      const storedLocalNotifs = localStorage.getItem(LOCAL_NOTIFS_KEY);
+      if (storedLocalNotifs !== null) {
+        setLocalNotificationsEnabledState(storedLocalNotifs === 'true');
       }
 
       if ('Notification' in window) {
@@ -107,6 +117,13 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
   };
 
+  const setLocalNotificationsEnabled = (enabled: boolean) => {
+    setLocalNotificationsEnabledState(enabled);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(LOCAL_NOTIFS_KEY, String(enabled));
+    }
+  };
+
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
@@ -137,12 +154,66 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     try {
       const permission = await Notification.requestPermission();
       setBrowserNotificationPermission(permission);
+      if (permission === 'granted') {
+        setLocalNotificationsEnabled(true);
+      }
       return permission === 'granted';
     } catch (err) {
       console.warn('Web notification request failed:', err);
       return false;
     }
   };
+
+  const triggerLocalNotification = useCallback(
+    async ({
+      title,
+      body,
+      link,
+      tag,
+    }: {
+      title: string;
+      body: string;
+      link?: string;
+      tag?: string;
+    }): Promise<boolean> => {
+      if (typeof window === 'undefined' || !('Notification' in window)) return false;
+
+      let currentPerm = Notification.permission;
+      if (currentPerm !== 'granted') {
+        const granted = await requestWebNotificationPermission();
+        if (!granted) return false;
+        currentPerm = 'granted';
+      }
+
+      const notifOptions = {
+        body,
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
+        tag: tag || `local_${Date.now()}`,
+        data: { url: link || '/' },
+        vibrate: [200, 100, 200],
+      };
+
+      try {
+        if ('serviceWorker' in navigator) {
+          const registration = await navigator.serviceWorker.ready;
+          await registration.showNotification(title, notifOptions as any);
+          return true;
+        }
+        new Notification(title, notifOptions);
+        return true;
+      } catch (err) {
+        try {
+          new Notification(title, notifOptions);
+          return true;
+        } catch (fallbackErr) {
+          console.warn('[LocalNotification] Failed to trigger notification:', fallbackErr);
+          return false;
+        }
+      }
+    },
+    []
+  );
 
   const addNotification = useCallback(
     ({
@@ -189,35 +260,22 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       // Add to floating toasts
       showToast(type, title, message, link);
 
-      // Trigger Native PWA Device Notification via ServiceWorkerRegistration
-      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-        const notifOptions = {
+      // Trigger Native PWA Device Notification if local notifications are enabled
+      if (
+        localNotificationsEnabled &&
+        typeof window !== 'undefined' &&
+        'Notification' in window &&
+        Notification.permission === 'granted'
+      ) {
+        triggerLocalNotification({
+          title,
           body: message,
-          icon: '/icon-192.png',
-          badge: '/icon-192.png',
+          link,
           tag: newNotif.id,
-          data: { url: link || '/' },
-          vibrate: [200, 100, 200],
-        };
-
-        if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.ready
-            .then((registration) => {
-              return registration.showNotification(title, notifOptions as any);
-            })
-            .catch(() => {
-              try {
-                new Notification(title, notifOptions);
-              } catch {}
-            });
-        } else {
-          try {
-            new Notification(title, notifOptions);
-          } catch {}
-        }
+        }).catch((err) => console.warn('[LocalNotification] Auto-dispatch failed:', err));
       }
     },
-    [soundEnabled, showToast]
+    [soundEnabled, showToast, localNotificationsEnabled, triggerLocalNotification]
   );
 
   const markAsRead = (id: string) => {
@@ -246,6 +304,9 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         setIsRealtimeConnected,
         soundEnabled,
         setSoundEnabled,
+        localNotificationsEnabled,
+        setLocalNotificationsEnabled,
+        triggerLocalNotification,
         addNotification,
         showToast,
         markAsRead,

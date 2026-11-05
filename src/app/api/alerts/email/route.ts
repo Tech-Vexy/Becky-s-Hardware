@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { triggerPusherEvent } from '@/lib/pusher/server';
 
 interface EmailAlertPayload {
   type: 'inventory' | 'payment' | 'sale' | 'system';
@@ -12,16 +13,29 @@ interface EmailAlertPayload {
   amountKes?: number;
   reference?: string;
   actionUrl?: string;
+  subject?: string;
+  headerLabel?: string;
+  fields?: Array<{ label: string; value: string }>;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body: EmailAlertPayload = await request.json();
+    const defaultRecipient = process.env.STORE_OWNER_EMAIL || 'eveliaveldrine@gmail.com';
     const {
       type = 'system',
       title,
       message,
-      recipientEmail = 'kamenengewa@gmail.com',
+      recipientEmail = defaultRecipient,
       productName,
       sku,
       currentStock,
@@ -29,6 +43,9 @@ export async function POST(request: NextRequest) {
       amountKes,
       reference,
       actionUrl = 'https://beckyshardware.co.ke',
+      subject,
+      headerLabel,
+      fields,
     } = body;
 
     if (!title || !message) {
@@ -42,6 +59,22 @@ export async function POST(request: NextRequest) {
     const sendgridApiKey = process.env.SENDGRID_API_KEY;
     const storeName = "Becky's Hardware Store";
     const timestamp = new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' });
+    const emailSubject =
+      typeof subject === 'string' && subject.trim()
+        ? subject
+        : `[ALERT] ${title} — Becky's Hardware`;
+    const headerText =
+      typeof headerLabel === 'string' && headerLabel.trim()
+        ? headerLabel
+        : 'REALTIME STORE ALERT';
+    const detailFields = Array.isArray(fields)
+      ? fields.filter(
+          (field) =>
+            field &&
+            typeof field.label === 'string' &&
+            typeof field.value === 'string'
+        )
+      : [];
 
     // Build responsive HTML email template
     const badgeColor =
@@ -68,7 +101,7 @@ export async function POST(request: NextRequest) {
                 <tr>
                   <td>
                     <span style="font-size: 11px; font-weight: 800; letter-spacing: 0.1em; color: #f59e0b; text-transform: uppercase;">
-                      REALTIME STORE ALERT
+                      ${escapeHtml(headerText)}
                     </span>
                     <h1 style="margin: 4px 0 0; font-size: 20px; font-weight: 900; color: #ffffff; letter-spacing: -0.02em;">
                       ${storeName}
@@ -95,6 +128,24 @@ export async function POST(request: NextRequest) {
               </p>
 
               <!-- Specific detail card -->
+              ${
+                detailFields.length > 0
+                  ? `
+              <table role="presentation" width="100%" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 24px; padding: 16px;">
+                ${detailFields
+                  .map(
+                    (field) => `
+                <tr>
+                  <td style="padding: 6px 0; font-size: 13px; color: #64748b;">${escapeHtml(field.label)}:</td>
+                  <td style="padding: 6px 0; font-size: 13px; font-weight: 700; color: #0f172a; text-align: right;">${escapeHtml(field.value)}</td>
+                </tr>`
+                  )
+                  .join('')}
+              </table>
+              `
+                  : ''
+              }
+
               ${
                 productName
                   ? `
@@ -154,27 +205,108 @@ export async function POST(request: NextRequest) {
 </html>
 `;
 
+    // Broadcast realtime event via Pusher if configured
+    const pusherEvent =
+      type === 'system'
+        ? 'daily-summary'
+        : type === 'inventory'
+        ? 'stock-alert'
+        : type === 'payment'
+        ? 'payment-received'
+        : 'store-announcement';
+
+    triggerPusherEvent({
+      event: pusherEvent,
+      data: {
+        type,
+        title,
+        message,
+        productName,
+        sku,
+        amountKes,
+        reference,
+        actionUrl,
+      },
+    }).catch((e) => console.warn('[Alerts] Pusher broadcast skipped:', e?.message));
+
     // 1. Try Resend if configured
     if (resendApiKey) {
+      const fromAddress = process.env.RESEND_FROM_EMAIL || "Becky's Hardware Store <onboarding@resend.dev>";
+      const replyToAddress = process.env.RESEND_REPLY_TO || 'eveliaveldrine@gmail.com';
+
+      const resendPayload = {
+        from: fromAddress,
+        to: [recipientEmail],
+        reply_to: replyToAddress,
+        subject: emailSubject,
+        html: htmlContent,
+      };
+
       const res = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${resendApiKey}`,
         },
-        body: JSON.stringify({
-          from: "Becky's Hardware <alerts@beckyshardware.co.ke>",
-          to: [recipientEmail],
-          subject: `[ALERT] ${title} — Becky's Hardware`,
-          html: htmlContent,
-        }),
+        body: JSON.stringify(resendPayload),
       });
 
       if (res.ok) {
         const data = await res.json();
-        return NextResponse.json({ success: true, provider: 'resend', id: data.id });
+        return NextResponse.json({
+          success: true,
+          provider: 'resend',
+          id: data.id,
+          recipient: recipientEmail,
+          replyTo: replyToAddress,
+        });
       }
-      console.warn('[Alerts] Resend dispatch failed:', await res.text());
+
+      const resendErrText = await res.text();
+      console.warn('[Alerts] Resend dispatch initial attempt:', resendErrText);
+
+      // Handle Resend trial/sandbox mode: if domain is not yet verified on Resend,
+      // Resend restricts delivery exclusively to the account holder's registered email address.
+      if (res.status === 403 && resendErrText.includes('You can only send testing emails to your own email address')) {
+        const match = resendErrText.match(/\(([^)]+@[^)]+)\)/);
+        const sandboxRegisteredEmail = match ? match[1] : 'eveliaveldrine@outlook.com';
+
+        const sandboxNotice = `
+          <div style="background-color: #fef3c7; border: 1px solid #f59e0b; padding: 12px 16px; border-radius: 8px; margin: 16px 28px 0; font-size: 12px; line-height: 1.5; color: #92400e;">
+            <strong>Resend Testing Mode Notice:</strong> Delivered to your verified Resend account (<code>${sandboxRegisteredEmail}</code>) because delivering directly to <code>${recipientEmail}</code> requires custom domain verification in your Resend Dashboard (<a href="https://resend.com/domains" style="color: #b45309; font-weight: bold;">resend.com/domains</a>). Replies will still route to <code>${replyToAddress}</code>.
+          </div>
+        `;
+        const modifiedHtml = htmlContent.replace('<!-- Alert Body -->', `<!-- Alert Body -->${sandboxNotice}`);
+
+        const retryRes = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${resendApiKey}`,
+          },
+          body: JSON.stringify({
+            from: fromAddress,
+            to: [sandboxRegisteredEmail],
+            reply_to: replyToAddress,
+            subject: `${emailSubject} [Resend Sandbox -> for ${recipientEmail}]`,
+            html: modifiedHtml,
+          }),
+        });
+
+        if (retryRes.ok) {
+          const retryData = await retryRes.json();
+          return NextResponse.json({
+            success: true,
+            provider: 'resend',
+            id: retryData.id,
+            sandboxRedirect: sandboxRegisteredEmail,
+            intendedRecipient: recipientEmail,
+            replyTo: replyToAddress,
+            message: `Delivered via Resend testing mode to ${sandboxRegisteredEmail} (for ${recipientEmail}). Verify a custom domain at resend.com/domains to deliver straight to ${recipientEmail}.`,
+          });
+        }
+        console.warn('[Alerts] Resend sandbox retry failed:', await retryRes.text());
+      }
     }
 
     // 2. Try SendGrid if configured
@@ -188,7 +320,7 @@ export async function POST(request: NextRequest) {
         body: JSON.stringify({
           personalizations: [{ to: [{ email: recipientEmail }] }],
           from: { email: 'alerts@beckyshardware.co.ke', name: "Becky's Hardware" },
-          subject: `[ALERT] ${title} — Becky's Hardware`,
+          subject: emailSubject,
           content: [{ type: 'text/html', value: htmlContent }],
         }),
       });

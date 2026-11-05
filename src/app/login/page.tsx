@@ -24,7 +24,7 @@ export default function LoginPage() {
   const { user, isAuthenticated, signInWithPassword } = useAuth();
   const { canInstall, promptInstall, isBannerDismissed } = useInstallPrompt();
 
-  const [email, setEmail]               = useState('kamenengewa@gmail.com');
+  const [email, setEmail]               = useState('eveliaveldrine@gmail.com');
   const [password, setPassword]         = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');

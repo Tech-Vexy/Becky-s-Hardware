@@ -5,6 +5,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import { AuthProvider, useAuth } from '@/lib/auth/AuthContext';
 import { NotificationProvider } from '@/lib/notifications/NotificationContext';
 import { RealtimeListener } from '@/components/notifications/RealtimeListener';
+import { PusherListener } from '@/components/notifications/PusherListener';
+import { DailySummaryNotifier } from '@/components/notifications/DailySummaryNotifier';
 import { ToastContainer } from '@/components/notifications/ToastContainer';
 import { Navbar } from '@/components/layout/Navbar';
 import { BottomNav } from '@/components/layout/BottomNav';
@@ -102,6 +104,7 @@ const AppContent: React.FC<{
       <OfflineBar />
 
       {/* ── Chrome ───────────────────────────────────────────────────── */}
+      <DailySummaryNotifier />
       <Navbar />
       <main className="flex-1 overflow-x-hidden p-3 sm:p-4 md:p-6 lg:p-8 pb-28">
         <div className="mx-auto max-w-7xl">{children}</div>
@@ -213,6 +216,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
     <AuthProvider>
       <NotificationProvider>
         <RealtimeListener />
+        <PusherListener />
         <AppContent
           swUpdateWaiting={swUpdateWaiting && !updateDismissed}
           onSwUpdate={handleSwUpdate}
