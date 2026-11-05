@@ -23,11 +23,12 @@ import {
   Lock,
   Tag,
   X,
+  Trash2,
 } from 'lucide-react';
 import type { Product, ProductCategory, ProductTag, StockMovement } from '@/lib/types/database';
 
 export default function CataloguePage() {
-  const { user, canManageInventory, canAlterPrices } = useAuth();
+  const { user, canManageInventory, canAlterPrices, canDeleteRecords } = useAuth();
 
   // ── Data ────────────────────────────────────────────────────────────────────
   const [products, setProducts]   = useState<Product[]>([]);
@@ -222,6 +223,24 @@ export default function CataloguePage() {
     await localDb.products.update(p.id, { active, updated_at: new Date().toISOString() });
     syncEngine.queueOperation('product_upsert', { id: p.id, active }).catch(console.error);
     await loadCatalogue();
+  };
+
+  const handleDeleteProduct = async (p: Product) => {
+    if (!confirm(`Are you sure you want to permanently delete "${p.product_name}" (SKU: ${p.sku})? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      // Delete from local database
+      await localDb.products.delete(p.id);
+
+      // Queue cloud sync deletion
+      syncEngine.queueOperation('product_delete', { id: p.id }).catch(console.error);
+
+      await loadCatalogue();
+    } catch (e: any) {
+      alert(`Error deleting product: ${e.message}`);
+    }
   };
 
   const handleOpenQuickAdjust = (p: Product) => {
@@ -501,6 +520,13 @@ export default function CataloguePage() {
                               }`}
                               title={p.active ? 'Discontinue' : 'Reactivate'}>
                               {p.active ? <Archive className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}
+                            </button>
+                          )}
+                          {canDeleteRecords && (
+                            <button onClick={() => handleDeleteProduct(p)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                              title="Permanently delete product">
+                              <Trash2 className="h-4 w-4" />
                             </button>
                           )}
                         </div>

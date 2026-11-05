@@ -474,8 +474,14 @@ class SyncEngine {
             if (item.operation_type === 'product_upsert') {
               const { error } = await supabase.from('products').upsert(item.payload);
               syncError = error;
+            } else if (item.operation_type === 'product_delete') {
+              const { error } = await supabase.from('products').delete().eq('id', item.payload.id);
+              syncError = error;
             } else if (item.operation_type === 'profile_upsert') {
               const { error } = await supabase.from('profiles').upsert(item.payload);
+              syncError = error;
+            } else if (item.operation_type === 'profile_delete') {
+              const { error } = await supabase.from('profiles').delete().eq('user_id', item.payload.user_id);
               syncError = error;
             } else if (item.operation_type === 'invoice_upsert') {
               try {
@@ -484,17 +490,32 @@ class SyncEngine {
               } catch (e) {
                 console.warn('Cloud invoice sync fallback:', e);
               }
+            } else if (item.operation_type === 'invoice_delete') {
+              const { error } = await supabase.from('invoices').delete().eq('id', item.payload.id);
+              syncError = error;
             } else if (item.operation_type === 'customer_upsert') {
               const { error } = await supabase.from('customers').upsert(item.payload);
+              syncError = error;
+            } else if (item.operation_type === 'customer_delete') {
+              const { error } = await supabase.from('customers').delete().eq('id', item.payload.id);
               syncError = error;
             } else if (item.operation_type === 'supplier_upsert') {
               const { error } = await supabase.from('suppliers').upsert(item.payload);
               syncError = error;
+            } else if (item.operation_type === 'supplier_delete') {
+              const { error } = await supabase.from('suppliers').delete().eq('id', item.payload.id);
+              syncError = error;
             } else if (item.operation_type === 'expense_upsert') {
               const { error } = await supabase.from('expenses').upsert(item.payload);
               syncError = error;
+            } else if (item.operation_type === 'expense_delete') {
+              const { error } = await supabase.from('expenses').delete().eq('id', item.payload.id);
+              syncError = error;
             } else if (item.operation_type === 'purchase_upsert') {
               const { error } = await supabase.from('purchases').upsert(item.payload);
+              syncError = error;
+            } else if (item.operation_type === 'purchase_delete') {
+              const { error } = await supabase.from('purchases').delete().eq('id', item.payload.id);
               syncError = error;
             } else if (item.operation_type === 'settings_upsert') {
               const { error } = await supabase.from('store_settings').upsert(item.payload);
