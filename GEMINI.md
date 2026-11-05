@@ -88,7 +88,7 @@ This document is the **universal, permanent system memory and operational instru
 
 ## 6. Daily Reports, Resend Email Delivery & Pusher WebSockets
 - **Email Delivery (Resend API)**:
-  - Daily financial and inventory summary digests dispatched to store owner `eveliaveldrine@gmail.com` via Resend API (`RESEND_API_KEY`).
+  - Daily financial and inventory summary digests dispatched to store owner `kamenengewa@gmail.com` via Resend API (`RESEND_API_KEY`).
   - Default sender: `"Becky's Hardware Store <onboarding@resend.dev>"` with `Reply-To: eveliaveldrine@gmail.com`.
   - Manual 1-click email dispatch from Reports (`/reports`) and Settings (`/settings`), plus automatic closing time trigger.
 - **Local Device Notifications**:

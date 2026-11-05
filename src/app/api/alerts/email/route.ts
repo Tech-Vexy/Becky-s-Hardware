@@ -30,7 +30,7 @@ function escapeHtml(value: string): string {
 export async function POST(request: NextRequest) {
   try {
     const body: EmailAlertPayload = await request.json();
-    const defaultRecipient = process.env.STORE_OWNER_EMAIL || 'eveliaveldrine@gmail.com';
+    const defaultRecipient = process.env.STORE_OWNER_EMAIL || 'kamenengewa@gmail.com';
     const {
       type = 'system',
       title,

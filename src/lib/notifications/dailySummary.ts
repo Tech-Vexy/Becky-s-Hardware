@@ -29,7 +29,7 @@ export interface DailySummaryConfig {
   time: string;
   /** Also email the digest to the store owner via Resend. */
   email: boolean;
-  /** Email address receiving the daily report. Defaults to eveliaveldrine@gmail.com. */
+  /** Email address receiving the daily report. Defaults to kamenengewa@gmail.com. */
   recipientEmail?: string;
   /** Whether to trigger native local device notifications. */
   localNotifications?: boolean;
@@ -39,7 +39,7 @@ export const DEFAULT_DAILY_SUMMARY_CONFIG: DailySummaryConfig = {
   enabled: true,
   time: '20:00',
   email: true,
-  recipientEmail: 'eveliaveldrine@gmail.com',
+  recipientEmail: 'kamenengewa@gmail.com',
   localNotifications: true,
 };
 
@@ -347,7 +347,7 @@ export async function sendDailySummaryEmail(
   summary: DailySummary,
   recipientEmail?: string
 ): Promise<boolean> {
-  const targetEmail = recipientEmail || loadDailySummaryConfig().recipientEmail || 'eveliaveldrine@gmail.com';
+  const targetEmail = recipientEmail || loadDailySummaryConfig().recipientEmail || 'kamenengewa@gmail.com';
   return dispatchEmailAlert({
     type: 'system',
     title: dailySummaryTitle(summary),

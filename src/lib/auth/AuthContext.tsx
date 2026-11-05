@@ -10,7 +10,7 @@ export const INITIAL_ADMIN_PROFILE: Profile = {
   user_id: '00000000-0000-0000-0000-000000000001',
   full_name: 'Store Owner',
   phone: '+254 712 345 678',
-  email: 'eveliaveldrine@gmail.com',
+  email: 'kamenengewa@gmail.com',
   role: 'admin',
   active: true,
   created_at: '2026-10-22T00:00:00.000Z',

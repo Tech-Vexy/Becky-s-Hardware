@@ -174,7 +174,7 @@ export default function SettingsPage() {
 
   const handleTestEmailAlert = async () => {
     setIsSendingTestEmail(true);
-    const targetEmail = dailySummaryConfig.recipientEmail || user?.email || 'eveliaveldrine@gmail.com';
+    const targetEmail = dailySummaryConfig.recipientEmail || user?.email || 'kamenengewa@gmail.com';
     const success = await dispatchEmailAlert({
       type: 'system',
       title: 'Test Email Alert: Store Notification',
@@ -208,7 +208,7 @@ export default function SettingsPage() {
     setIsSendingDailyPreview(true);
     try {
       const summary = await buildDailySummary();
-      const targetEmail = dailySummaryConfig.recipientEmail || user?.email || 'eveliaveldrine@gmail.com';
+      const targetEmail = dailySummaryConfig.recipientEmail || user?.email || 'kamenengewa@gmail.com';
 
       // 1. Local Notification
       if (dailySummaryConfig.localNotifications !== false) {
@@ -639,7 +639,7 @@ export default function SettingsPage() {
                 <Mail className="h-3.5 w-3.5 text-slate-500" />
                 <span>Automated Email Alerts (Resend)</span>
                 <span className="font-mono text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
-                  {dailySummaryConfig.recipientEmail || user?.email || 'eveliaveldrine@gmail.com'}
+                  {dailySummaryConfig.recipientEmail || user?.email || 'kamenengewa@gmail.com'}
                 </span>
                 <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded text-[9px] font-bold">
                   Resend Active
@@ -775,10 +775,10 @@ export default function SettingsPage() {
               <label className="font-bold text-slate-700">Owner Report Email (Resend)</label>
               <input
                 type="email"
-                value={dailySummaryConfig.recipientEmail || 'eveliaveldrine@gmail.com'}
+                value={dailySummaryConfig.recipientEmail || 'kamenengewa@gmail.com'}
                 onChange={(e) => handleUpdateDailySummaryConfig({ recipientEmail: e.target.value })}
                 disabled={!canManageInventory}
-                placeholder="eveliaveldrine@gmail.com"
+                placeholder="kamenengewa@gmail.com"
                 className="w-full mt-1 p-2 rounded-xl border border-slate-300 font-mono text-xs focus:outline-none disabled:bg-slate-50"
               />
               <div className="text-[10px] text-slate-400 mt-1">
@@ -886,7 +886,7 @@ export default function SettingsPage() {
           </div>
           <div className="flex justify-between">
             <span className="text-slate-500">Email:</span>
-            <span className="font-mono text-slate-700">{user?.email || 'eveliaveldrine@gmail.com'}</span>
+            <span className="font-mono text-slate-700">{user?.email || 'kamenengewa@gmail.com'}</span>
           </div>
         </div>
       </Card>

@@ -59,7 +59,7 @@ This document serves as the permanent reference guide for agents and developers 
 
 ## 6. Daily Reports, Resend Email Delivery & Pusher Local Notifications
 - **Email Dispatcher (Resend)**:
-  - Daily financial and inventory summary digests dispatched to store owner `eveliaveldrine@gmail.com` via Resend API.
+  - Daily financial and inventory summary digests dispatched to store owner `kamenengewa@gmail.com` via Resend API.
   - From address: `"Becky's Hardware Store <onboarding@resend.dev>"` with `Reply-To: eveliaveldrine@gmail.com`.
   - Manual 1-click email dispatch from Reports (`/reports`) and Settings (`/settings`), plus automatic closing time trigger.
 - **Local Device Notifications**:

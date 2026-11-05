@@ -149,17 +149,17 @@ test('Realtime Event Handler: M-Pesa payment verification dispatch', () => {
   assert.equal(updateNotif.verified, true);
 });
 
-test('Daily Summary Configuration & Resend Email Targeting: Defaults to eveliaveldrine@gmail.com', () => {
+test('Daily Summary Configuration & Resend Email Targeting: Defaults to kamenengewa@gmail.com', () => {
   const DEFAULT_CONFIG = {
     enabled: true,
     time: '20:00',
     email: true,
-    recipientEmail: 'eveliaveldrine@gmail.com',
+    recipientEmail: 'kamenengewa@gmail.com',
     localNotifications: true,
   };
 
   assert.equal(DEFAULT_CONFIG.email, true);
-  assert.equal(DEFAULT_CONFIG.recipientEmail, 'eveliaveldrine@gmail.com');
+  assert.equal(DEFAULT_CONFIG.recipientEmail, 'kamenengewa@gmail.com');
   assert.equal(DEFAULT_CONFIG.localNotifications, true);
 
   // Normalization logic
@@ -181,7 +181,7 @@ test('Daily Summary Configuration & Resend Email Targeting: Defaults to eveliave
 
   // Fallback test
   const emptyNorm = normalizeConfig({});
-  assert.equal(emptyNorm.recipientEmail, 'eveliaveldrine@gmail.com');
+  assert.equal(emptyNorm.recipientEmail, 'kamenengewa@gmail.com');
   assert.equal(emptyNorm.localNotifications, true);
 
   // Custom email override

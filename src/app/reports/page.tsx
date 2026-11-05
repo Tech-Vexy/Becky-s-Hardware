@@ -200,7 +200,7 @@ export default function ReportsPage() {
     try {
       const summary = await buildDailySummary();
       const config = loadDailySummaryConfig();
-      const targetEmail = config.recipientEmail || user?.email || 'eveliaveldrine@gmail.com';
+      const targetEmail = config.recipientEmail || user?.email || 'kamenengewa@gmail.com';
 
       // Fire local notification
       addNotification({
